@@ -61,11 +61,17 @@ func TestRenewalTime(t *testing.T) {
 			renewBefore:         &metav1.Duration{Duration: time.Hour * 706}, // 1 month - 1 day
 			expectedRenewalTime: &metav1.Time{Time: now.Add(time.Hour * 24)},
 		},
-		"spec.renewBefore is set, but would result in renewal time after expiry": {
+		"spec.renewBefore is set to a value greater than cert's duration, should renew immediately": {
 			notBefore:           now,
 			notAfter:            now.Add(time.Hour * 24),
 			renewBefore:         &metav1.Duration{Duration: time.Hour * 25},
-			expectedRenewalTime: &metav1.Time{Time: now.Add(time.Hour * 16)},
+			expectedRenewalTime: &metav1.Time{Time: now},
+		},
+		"spec.renewBefore equals cert's duration, should renew immediately": {
+			notBefore:           now,
+			notAfter:            now.Add(time.Hour * 24),
+			renewBefore:         &metav1.Duration{Duration: time.Hour * 24},
+			expectedRenewalTime: &metav1.Time{Time: now},
 		},
 		"long lived cert, spec.renewBeforePercentage is set to renew 30% before expiry": {
 			notBefore:           now,
@@ -131,9 +137,9 @@ func TestRenewBefore(t *testing.T) {
 			renewBefore:         &metav1.Duration{Duration: time.Hour * 1},
 			expectedRenewBefore: time.Hour,
 		},
-		"spec.renewBefore is invalid so default is used": {
+		"spec.renewBefore is invalid so actualDuration is used": {
 			renewBefore:         &metav1.Duration{Duration: time.Hour * 4},
-			expectedRenewBefore: time.Hour,
+			expectedRenewBefore: time.Hour * 3,
 		},
 	}
 	for n, s := range tests {

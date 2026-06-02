@@ -280,9 +280,15 @@ func CurrentCertificateNearingExpiry(c clock.Clock) Func {
 			message = err.Error()
 		}
 
+		if renewalTime == nil {
+			if err != nil {
+				return WindowError, err.Error(), true
+			}
+			return "", "", false
+		}
+
 		renewIn := renewalTime.Time.Sub(c.Now())
 		if renewIn > 0 {
-			// renewal time is in the future, no need to renew
 			return "", "", false
 		}
 

@@ -1390,6 +1390,277 @@ func Test_SecretAdditionalOutputFormatsMismatch(t *testing.T) {
 	}
 }
 
+func TestCurrentCertificateNearingExpiry(t *testing.T) {
+	fixedTime := time.Now().Truncate(time.Second)
+	fakeClock := fakeclock.NewFakeClock(fixedTime)
+	staticFixedPrivateKey := testcrypto.MustCreatePEMPrivateKey(t)
+
+	baseCert := &cmapi.Certificate{
+		Spec: cmapi.CertificateSpec{
+			CommonName: "example.com",
+			IssuerRef: cmmeta.IssuerReference{
+				Name:  "testissuer",
+				Kind:  "IssuerKind",
+				Group: "group.example.com",
+			},
+		},
+	}
+
+	makeSecretWithCertTimes := func(notBefore, notAfter time.Time) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "something",
+				Annotations: map[string]string{
+					cmapi.IssuerNameAnnotationKey:  "testissuer",
+					cmapi.IssuerKindAnnotationKey:  "IssuerKind",
+					cmapi.IssuerGroupAnnotationKey: "group.example.com",
+				},
+			},
+			Data: map[string][]byte{
+				corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+				corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+					&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+					notBefore,
+					notAfter,
+				),
+			},
+		}
+	}
+
+	t.Run("explicit renewBefore", func(t *testing.T) {
+		tests := map[string]struct {
+			crt       *cmapi.Certificate
+			secret    *corev1.Secret
+			expReason string
+			expReissue bool
+		}{
+			"renewBefore is set and renewal time has passed": {
+				crt: func() *cmapi.Certificate {
+					c := baseCert.DeepCopy()
+					c.Spec.RenewBefore = &metav1.Duration{Duration: time.Minute * 5}
+					return c
+				}(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Minute*30),
+					fakeClock.Now().Add(time.Minute*1),
+				),
+				expReason:  Renewing,
+				expReissue: true,
+			},
+			"renewBefore is set and renewal time has not yet passed": {
+				crt: func() *cmapi.Certificate {
+					c := baseCert.DeepCopy()
+					c.Spec.RenewBefore = &metav1.Duration{Duration: time.Minute * 1}
+					return c
+				}(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Minute*30),
+					fakeClock.Now().Add(time.Minute*30),
+				),
+				expReason:  "",
+				expReissue: false,
+			},
+			"renewBefore equals actual duration, should renew immediately": {
+				crt: func() *cmapi.Certificate {
+					c := baseCert.DeepCopy()
+					c.Spec.RenewBefore = &metav1.Duration{Duration: time.Hour * 1}
+					return c
+				}(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Minute*30),
+					fakeClock.Now().Add(time.Minute*30),
+				),
+				expReason:  Renewing,
+				expReissue: true,
+			},
+			"renewBefore exceeds actual duration, should renew immediately": {
+				crt: func() *cmapi.Certificate {
+					c := baseCert.DeepCopy()
+					c.Spec.RenewBefore = &metav1.Duration{Duration: time.Hour * 24}
+					return c
+				}(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Minute*30),
+					fakeClock.Now().Add(time.Minute*30),
+				),
+				expReason:  Renewing,
+				expReissue: true,
+			},
+		}
+
+		for name, test := range tests {
+			t.Run(name, func(t *testing.T) {
+				fn := CurrentCertificateNearingExpiry(fakeClock)
+				reason, _, reissue := fn(Input{
+					Certificate: test.crt,
+					Secret:      test.secret,
+				})
+				assert.Equal(t, test.expReason, reason)
+				assert.Equal(t, test.expReissue, reissue)
+			})
+		}
+	})
+
+	t.Run("unset renewBefore", func(t *testing.T) {
+		tests := map[string]struct {
+			crt       *cmapi.Certificate
+			secret    *corev1.Secret
+			expReason string
+			expReissue bool
+		}{
+			"no renewBefore set, default 2/3 renewal time has passed": {
+				crt: baseCert.DeepCopy(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Hour*2),
+					fakeClock.Now().Add(time.Hour*1),
+				),
+				expReason:  Renewing,
+				expReissue: true,
+			},
+			"no renewBefore set, default 2/3 renewal time has not yet passed": {
+				crt: baseCert.DeepCopy(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Minute*30),
+					fakeClock.Now().Add(time.Hour*1+time.Minute*30),
+				),
+				expReason:  "",
+				expReissue: false,
+			},
+		}
+
+		for name, test := range tests {
+			t.Run(name, func(t *testing.T) {
+				fn := CurrentCertificateNearingExpiry(fakeClock)
+				reason, _, reissue := fn(Input{
+					Certificate: test.crt,
+					Secret:      test.secret,
+				})
+				assert.Equal(t, test.expReason, reason)
+				assert.Equal(t, test.expReissue, reissue)
+			})
+		}
+	})
+
+	t.Run("certificate already expired", func(t *testing.T) {
+		tests := map[string]struct {
+			crt       *cmapi.Certificate
+			secret    *corev1.Secret
+			expReason string
+			expReissue bool
+		}{
+			"certificate has expired, should trigger renewal": {
+				crt: func() *cmapi.Certificate {
+					c := baseCert.DeepCopy()
+					c.Spec.RenewBefore = &metav1.Duration{Duration: time.Minute * 5}
+					return c
+				}(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Hour*2),
+					fakeClock.Now().Add(-time.Minute*30),
+				),
+				expReason:  Renewing,
+				expReissue: true,
+			},
+			"certificate has expired, no renewBefore set, should trigger renewal": {
+				crt: baseCert.DeepCopy(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Hour*2),
+					fakeClock.Now().Add(-time.Minute*30),
+				),
+				expReason:  Renewing,
+				expReissue: true,
+			},
+			"certificate has expired with renewal policy Disabled, should not trigger renewal": {
+				crt: func() *cmapi.Certificate {
+					c := baseCert.DeepCopy()
+					c.Spec.Renewal = &cmapi.CertificateRenewal{
+						Policy: cmapi.CertificateRenewalPolicyDisabled,
+					}
+					return c
+				}(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Hour*2),
+					fakeClock.Now().Add(-time.Minute*30),
+				),
+				expReason:  "",
+				expReissue: false,
+			},
+			"certificate with unsupported renewal policy, should trigger renewal as safety measure": {
+				crt: func() *cmapi.Certificate {
+					c := baseCert.DeepCopy()
+					c.Spec.Renewal = &cmapi.CertificateRenewal{
+						Policy: "UnsupportedPolicy",
+					}
+					return c
+				}(),
+				secret: makeSecretWithCertTimes(
+					fakeClock.Now().Add(-time.Hour*2),
+					fakeClock.Now().Add(-time.Minute*30),
+				),
+				expReason:  WindowError,
+				expReissue: true,
+			},
+		}
+
+		for name, test := range tests {
+			t.Run(name, func(t *testing.T) {
+				fn := CurrentCertificateNearingExpiry(fakeClock)
+				reason, _, reissue := fn(Input{
+					Certificate: test.crt,
+					Secret:      test.secret,
+				})
+				assert.Equal(t, test.expReason, reason)
+				assert.Equal(t, test.expReissue, reissue)
+			})
+		}
+	})
+}
+
+func TestCurrentCertificateHasExpired(t *testing.T) {
+	fixedTime := time.Now().Truncate(time.Second)
+	fakeClock := fakeclock.NewFakeClock(fixedTime)
+	staticFixedPrivateKey := testcrypto.MustCreatePEMPrivateKey(t)
+
+	makeSecretWithCertTimes := func(notBefore, notAfter time.Time) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "something"},
+			Data: map[string][]byte{
+				corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+				corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+					&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+					notBefore,
+					notAfter,
+				),
+			},
+		}
+	}
+
+	t.Run("certificate has expired", func(t *testing.T) {
+		fn := CurrentCertificateHasExpired(fakeClock)
+		reason, _, reissue := fn(Input{
+			Certificate: &cmapi.Certificate{},
+			Secret: makeSecretWithCertTimes(
+				fakeClock.Now().Add(-time.Hour*2),
+				fakeClock.Now().Add(-time.Minute*1),
+			),
+		})
+		assert.Equal(t, Expired, reason)
+		assert.True(t, reissue)
+	})
+
+	t.Run("certificate has not expired", func(t *testing.T) {
+		fn := CurrentCertificateHasExpired(fakeClock)
+		reason, _, reissue := fn(Input{
+			Certificate: &cmapi.Certificate{},
+			Secret: makeSecretWithCertTimes(
+				fakeClock.Now().Add(-time.Minute*30),
+				fakeClock.Now().Add(time.Minute*30),
+			),
+		})
+		assert.Equal(t, "", reason)
+		assert.False(t, reissue)
+	})
+}
+
 func Test_SecretAdditionalOutputFormatsManagedFieldsMismatch(t *testing.T) {
 	const fieldManager = "cert-manager-test"
 

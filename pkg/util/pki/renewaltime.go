@@ -82,16 +82,15 @@ func RenewalTime(notBefore, notAfter time.Time, renewBefore *metav1.Duration, re
 // Note that this function used to be called RenewBefore and was an exported function which would expose the renewal time.
 // Currently, this function calculates the desired renewal time and feeds into the renewal windows logic called above.
 func desiredRenewalTime(actualDuration time.Duration, renewBefore *metav1.Duration, renewBeforePercentage *int32) time.Duration {
-	// If spec.renewBefore or spec.renewBeforePercentage was set (and is
-	// valid) respect that. We don't want to prevent users from renewing
-	// longer lived certs more frequently.
-	if renewBefore != nil && renewBefore.Duration > 0 && renewBefore.Duration < actualDuration {
-		return renewBefore.Duration
+	if renewBefore != nil && renewBefore.Duration > 0 {
+		if renewBefore.Duration < actualDuration {
+			return renewBefore.Duration
+		}
+		return actualDuration
 	} else if renewBeforePercentage != nil && *renewBeforePercentage > 0 && *renewBeforePercentage < 100 {
 		return actualDuration * time.Duration(*renewBeforePercentage) / 100
 	}
 
-	// Otherwise, default to renewing 2/3 through certificate's lifetime.
 	return actualDuration / 3
 }
 
