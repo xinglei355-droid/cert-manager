@@ -1,3 +1,81 @@
+diff --git a/1.2.3.patch b/1.2.3.patch
+new file mode 100644
+index 000000000..4fd4f777a
+--- /dev/null
++++ b/1.2.3.patch
+@@ -0,0 +1,72 @@
++diff --git a/pkg/api/util/conditions.go b/pkg/api/util/conditions.go
++index df247f29c..69473514a 100644
++--- a/pkg/api/util/conditions.go
+++++ b/pkg/api/util/conditions.go
++@@ -254,38 +254,39 @@ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType
++ 	nowTime := metav1.NewTime(Clock.Now())
++ 	newCondition.LastTransitionTime = &nowTime
++ 
++-	// Search through existing conditions
++-	for idx, cond := range cr.Status.Conditions {
++-		// Skip unrelated conditions
++-		if cond.Type != conditionType {
+++	var updatedConditions []cmapi.CertificateRequestCondition
+++	found := false
+++	for _, cond := range cr.Status.Conditions {
+++		if cond.Type == conditionType {
+++			if found {
+++				continue // skip duplicates
+++			}
+++			found = true
+++			// If this update doesn't contain a state transition, we don't update
+++			// the conditions LastTransitionTime to Now()
+++			if cond.Status == status {
+++				newCondition.LastTransitionTime = cond.LastTransitionTime
+++			} else {
+++				logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
+++					"certificateRequest", klog.KObj(cr),
+++					"condition", conditionType,
+++					"oldStatus", cond.Status,
+++					"status", status,
+++					"lastTransitionTime", nowTime.Time)
+++			}
++ 			continue
++ 		}
++-
++-		// If this update doesn't contain a state transition, we don't update
++-		// the conditions LastTransitionTime to Now()
++-		if cond.Status == status {
++-			newCondition.LastTransitionTime = cond.LastTransitionTime
++-		} else {
++-			logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
++-				"certificateRequest", klog.KObj(cr),
++-				"condition", conditionType,
++-				"oldStatus", cond.Status,
++-				"status", status,
++-				"lastTransitionTime", nowTime.Time)
++-		}
++-
++-		// Overwrite the existing condition
++-		cr.Status.Conditions[idx] = newCondition
++-		return
+++		updatedConditions = append(updatedConditions, cond)
++ 	}
++ 
++-	// If we've not found an existing condition of this type, we simply insert
++-	// the new condition into the slice.
++-	cr.Status.Conditions = append(cr.Status.Conditions, newCondition)
++-	logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
++-		"certificateRequest", klog.KObj(cr),
++-		"condition", conditionType,
++-		"lastTransitionTime", nowTime.Time)
+++	cr.Status.Conditions = append(updatedConditions, newCondition)
+++	
+++	if !found {
+++		logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
+++			"certificateRequest", klog.KObj(cr),
+++			"condition", conditionType,
+++			"lastTransitionTime", nowTime.Time)
+++	}
++ }
++ 
++ // CertificateRequestHasCondition will return true if the given
 diff --git a/pkg/api/util/conditions.go b/pkg/api/util/conditions.go
 index df247f29c..69473514a 100644
 --- a/pkg/api/util/conditions.go
@@ -70,3 +148,222 @@ index df247f29c..69473514a 100644
  }
  
  // CertificateRequestHasCondition will return true if the given
+diff --git a/pkg/api/util/conditions_test.go b/pkg/api/util/conditions_test.go
+new file mode 100644
+index 000000000..bb1f2b36a
+--- /dev/null
++++ b/pkg/api/util/conditions_test.go
+@@ -0,0 +1,213 @@
++/*
++Copyright 2021 The cert-manager Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package util
++
++import (
++	"reflect"
++	"testing"
++	"time"
++
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/utils/clock"
++	testingclock "k8s.io/utils/clock/testing"
++
++	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++)
++
++func TestSetCertificateRequestCondition(t *testing.T) {
++	now := time.Now()
++	nowMeta := metav1.NewTime(now)
++
++	tests := []struct {
++		name          string
++		cr            *cmapi.CertificateRequest
++		conditionType cmapi.CertificateRequestConditionType
++		status        cmmeta.ConditionStatus
++		reason        string
++		message       string
++		expected      *cmapi.CertificateRequest
++	}{
++		{
++			name: "add new Approved condition",
++			cr: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{},
++			},
++			conditionType: cmapi.CertificateRequestConditionApproved,
++			status:        cmmeta.ConditionTrue,
++			reason:        "Approved",
++			message:       "Request approved",
++			expected: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionApproved,
++							Status:             cmmeta.ConditionTrue,
++							Reason:             "Approved",
++							Message:            "Request approved",
++							LastTransitionTime: &nowMeta,
++						},
++					},
++				},
++			},
++		},
++		{
++			name: "add new Denied condition",
++			cr: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{},
++			},
++			conditionType: cmapi.CertificateRequestConditionDenied,
++			status:        cmmeta.ConditionTrue,
++			reason:        "Denied",
++			message:       "Request denied",
++			expected: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionDenied,
++							Status:             cmmeta.ConditionTrue,
++							Reason:             "Denied",
++							Message:            "Request denied",
++							LastTransitionTime: &nowMeta,
++						},
++					},
++				},
++			},
++		},
++		{
++			name: "update existing Ready=False to Ready=True (state transition)",
++			cr: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             "Pending",
++							Message:            "Request pending",
++							LastTransitionTime: &metav1.Time{Time: now.Add(-time.Hour)},
++						},
++					},
++				},
++			},
++			conditionType: cmapi.CertificateRequestConditionReady,
++			status:        cmmeta.ConditionTrue,
++			reason:        "Issued",
++			message:       "Request issued",
++			expected: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionTrue,
++							Reason:             "Issued",
++							Message:            "Request issued",
++							LastTransitionTime: &nowMeta,
++						},
++					},
++				},
++			},
++		},
++		{
++			name: "update existing Ready=False with new Reason (no state transition)",
++			cr: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             "Pending",
++							Message:            "Request pending",
++							LastTransitionTime: &metav1.Time{Time: now.Add(-time.Hour)},
++						},
++					},
++				},
++			},
++			conditionType: cmapi.CertificateRequestConditionReady,
++			status:        cmmeta.ConditionFalse,
++			reason:        "Denied",
++			message:       "Request denied",
++			expected: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             "Denied",
++							Message:            "Request denied",
++							LastTransitionTime: &metav1.Time{Time: now.Add(-time.Hour)},
++						},
++					},
++				},
++			},
++		},
++		{
++			name: "clean up duplicate conditions of the same type",
++			cr: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             "Pending",
++							Message:            "Request pending 1",
++							LastTransitionTime: &metav1.Time{Time: now.Add(-time.Hour)},
++						},
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             "Pending",
++							Message:            "Request pending 2",
++							LastTransitionTime: &metav1.Time{Time: now.Add(-time.Hour)},
++						},
++					},
++				},
++			},
++			conditionType: cmapi.CertificateRequestConditionReady,
++			status:        cmmeta.ConditionFalse,
++			reason:        "Denied",
++			message:       "Request denied",
++			expected: &cmapi.CertificateRequest{
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             "Denied",
++							Message:            "Request denied",
++							LastTransitionTime: &metav1.Time{Time: now.Add(-time.Hour)},
++						},
++					},
++				},
++			},
++		},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			Clock = testingclock.NewFakeClock(now)
++			defer func() {
++				Clock = clock.RealClock{}
++			}()
++
++			SetCertificateRequestCondition(tt.cr, tt.conditionType, tt.status, tt.reason, tt.message)
++
++			if !reflect.DeepEqual(tt.cr, tt.expected) {
++				t.Errorf("SetCertificateRequestCondition() \n got = %v\n want = %v", tt.cr, tt.expected)
++			}
++		})
++	}
++}
