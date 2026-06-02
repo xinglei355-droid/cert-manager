@@ -85,14 +85,20 @@ func desiredRenewalTime(actualDuration time.Duration, renewBefore *metav1.Durati
 	// If spec.renewBefore or spec.renewBeforePercentage was set (and is
 	// valid) respect that. We don't want to prevent users from renewing
 	// longer lived certs more frequently.
-	if renewBefore != nil && renewBefore.Duration > 0 && renewBefore.Duration < actualDuration {
+	if renewBefore != nil && renewBefore.Duration > 0 && renewBefore.Duration <= actualDuration {
 		return renewBefore.Duration
 	} else if renewBeforePercentage != nil && *renewBeforePercentage > 0 && *renewBeforePercentage < 100 {
 		return actualDuration * time.Duration(*renewBeforePercentage) / 100
 	}
 
 	// Otherwise, default to renewing 2/3 through certificate's lifetime.
-	return actualDuration / 3
+	// Ensure a minimum of 1 second to avoid renewal time being calculated
+	// exactly at NotAfter for very short-lived certificates.
+	renewBeforeDuration := actualDuration / 3
+	if renewBeforeDuration < time.Second {
+		renewBeforeDuration = time.Second
+	}
+	return renewBeforeDuration
 }
 
 // applyRenewBeforeWithWindows calculates effective renewal time with windows in it. We want the logic to be as follows:

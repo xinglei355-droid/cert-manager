@@ -543,6 +543,112 @@ func Test_NewTriggerPolicyChain(t *testing.T) {
 				},
 			},
 		},
+		"trigger renewal with explicit renewBefore when certificate is approaching expiry": {
+			certificate: &cmapi.Certificate{
+				Spec: cmapi.CertificateSpec{
+					CommonName: "example.com",
+					IssuerRef: cmmeta.IssuerReference{
+						Name:  "testissuer",
+						Kind:  "IssuerKind",
+						Group: "group.example.com",
+					},
+					RenewBefore: &metav1.Duration{Duration: time.Minute * 15},
+				},
+				Status: cmapi.CertificateStatus{
+					RenewalTime: &metav1.Time{Time: clock.Now().Add(time.Minute * -10)},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "something",
+					Annotations: map[string]string{
+						cmapi.IssuerNameAnnotationKey:  "testissuer",
+						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
+						cmapi.IssuerGroupAnnotationKey: "group.example.com",
+					},
+				},
+				Data: map[string][]byte{
+					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+						clock.Now().Add(time.Minute*-50),
+						clock.Now().Add(time.Minute*5),
+					),
+				},
+			},
+			reason:  Renewing,
+			message: "Renewing certificate as renewal was scheduled at 0001-01-01 00:00:00 +0000 UTC",
+			reissue: true,
+		},
+		"trigger renewal without renewBefore using default two-thirds of certificate lifetime": {
+			certificate: &cmapi.Certificate{
+				Spec: cmapi.CertificateSpec{
+					CommonName: "example.com",
+					IssuerRef: cmmeta.IssuerReference{
+						Name:  "testissuer",
+						Kind:  "IssuerKind",
+						Group: "group.example.com",
+					},
+				},
+				Status: cmapi.CertificateStatus{
+					RenewalTime: &metav1.Time{Time: clock.Now().Add(time.Minute * -10)},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "something",
+					Annotations: map[string]string{
+						cmapi.IssuerNameAnnotationKey:  "testissuer",
+						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
+						cmapi.IssuerGroupAnnotationKey: "group.example.com",
+					},
+				},
+				Data: map[string][]byte{
+					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+						clock.Now().Add(time.Minute*-50),
+						clock.Now().Add(time.Minute*10),
+					),
+				},
+			},
+			reason:  Renewing,
+			message: "Renewing certificate as renewal was scheduled at 0001-01-01 00:00:00 +0000 UTC",
+			reissue: true,
+		},
+		"trigger renewal when certificate has already expired": {
+			certificate: &cmapi.Certificate{
+				Spec: cmapi.CertificateSpec{
+					CommonName: "example.com",
+					IssuerRef: cmmeta.IssuerReference{
+						Name:  "testissuer",
+						Kind:  "IssuerKind",
+						Group: "group.example.com",
+					},
+				},
+				Status: cmapi.CertificateStatus{
+					RenewalTime: &metav1.Time{Time: clock.Now().Add(time.Minute * -30)},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "something",
+					Annotations: map[string]string{
+						cmapi.IssuerNameAnnotationKey:  "testissuer",
+						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
+						cmapi.IssuerGroupAnnotationKey: "group.example.com",
+					},
+				},
+				Data: map[string][]byte{
+					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+						clock.Now().Add(time.Minute*-60),
+						clock.Now().Add(time.Minute*-5),
+					),
+				},
+			},
+			reason:  Renewing,
+			message: "Renewing certificate as renewal was scheduled at 0001-01-01 00:00:00 +0000 UTC",
+			reissue: true,
+		},
 	}
 	policyChain := NewTriggerPolicyChain(clock)
 	for name, test := range tests {

@@ -135,10 +135,43 @@ func TestRenewBefore(t *testing.T) {
 			renewBefore:         &metav1.Duration{Duration: time.Hour * 4},
 			expectedRenewBefore: time.Hour,
 		},
+		"spec.renewBefore equals certificate duration (boundary case)": {
+			renewBefore:         &metav1.Duration{Duration: time.Hour * 3},
+			expectedRenewBefore: time.Hour * 3,
+		},
 	}
 	for n, s := range tests {
 		t.Run(n, func(t *testing.T) {
 			renewBefore := desiredRenewalTime(duration, s.renewBefore, s.renewBeforePct)
+			assert.Equal(t, s.expectedRenewBefore, renewBefore, fmt.Sprintf("Expected renewBefore time: %v got: %v", s.expectedRenewBefore, renewBefore))
+		})
+	}
+}
+
+func TestDesiredRenewalTimeMinimumDefault(t *testing.T) {
+	tests := map[string]struct {
+		actualDuration         time.Duration
+		renewBefore            *metav1.Duration
+		renewBeforePct         *int32
+		expectedRenewBefore    time.Duration
+	}{
+		"very short duration, default renewal should be at least 1 second": {
+			actualDuration:      time.Second * 2,
+			expectedRenewBefore: time.Second,
+		},
+		"very short duration, explicit renewBefore shorter than default": {
+			actualDuration:      time.Second * 2,
+			renewBefore:         &metav1.Duration{Duration: time.Millisecond * 500},
+			expectedRenewBefore: time.Millisecond * 500,
+		},
+		"normal duration, default renewal": {
+			actualDuration:      time.Hour * 3,
+			expectedRenewBefore: time.Hour,
+		},
+	}
+	for n, s := range tests {
+		t.Run(n, func(t *testing.T) {
+			renewBefore := desiredRenewalTime(s.actualDuration, s.renewBefore, s.renewBeforePct)
 			assert.Equal(t, s.expectedRenewBefore, renewBefore, fmt.Sprintf("Expected renewBefore time: %v got: %v", s.expectedRenewBefore, renewBefore))
 		})
 	}

@@ -1,0 +1,213 @@
+diff --git a/internal/controller/certificates/policies/checks.go b/internal/controller/certificates/policies/checks.go
+index 9263f5f12..3e85e7d22 100644
+--- a/internal/controller/certificates/policies/checks.go
++++ b/internal/controller/certificates/policies/checks.go
+@@ -280,6 +280,13 @@ func CurrentCertificateNearingExpiry(c clock.Clock) Func {
+ 			message = err.Error()
+ 		}
+ 
++		if renewalTime == nil {
++			if err != nil {
++				return reason, message, true
++			}
++			return "", "", false
++		}
++
+ 		renewIn := renewalTime.Time.Sub(c.Now())
+ 		if renewIn > 0 {
+ 			// renewal time is in the future, no need to renew
+diff --git a/internal/controller/certificates/policies/checks_test.go b/internal/controller/certificates/policies/checks_test.go
+index 4652a3f59..529ab2a61 100644
+--- a/internal/controller/certificates/policies/checks_test.go
++++ b/internal/controller/certificates/policies/checks_test.go
+@@ -543,6 +543,112 @@ func Test_NewTriggerPolicyChain(t *testing.T) {
+ 				},
+ 			},
+ 		},
++		"trigger renewal with explicit renewBefore when certificate is approaching expiry": {
++			certificate: &cmapi.Certificate{
++				Spec: cmapi.CertificateSpec{
++					CommonName: "example.com",
++					IssuerRef: cmmeta.IssuerReference{
++						Name:  "testissuer",
++						Kind:  "IssuerKind",
++						Group: "group.example.com",
++					},
++					RenewBefore: &metav1.Duration{Duration: time.Minute * 15},
++				},
++				Status: cmapi.CertificateStatus{
++					RenewalTime: &metav1.Time{Time: clock.Now().Add(time.Minute * -10)},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: "something",
++					Annotations: map[string]string{
++						cmapi.IssuerNameAnnotationKey:  "testissuer",
++						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
++						cmapi.IssuerGroupAnnotationKey: "group.example.com",
++					},
++				},
++				Data: map[string][]byte{
++					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
++					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
++						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
++						clock.Now().Add(time.Minute*-50),
++						clock.Now().Add(time.Minute*5),
++					),
++				},
++			},
++			reason:  Renewing,
++			message: "Renewing certificate as renewal was scheduled at 0001-01-01 00:00:00 +0000 UTC",
++			reissue: true,
++		},
++		"trigger renewal without renewBefore using default two-thirds of certificate lifetime": {
++			certificate: &cmapi.Certificate{
++				Spec: cmapi.CertificateSpec{
++					CommonName: "example.com",
++					IssuerRef: cmmeta.IssuerReference{
++						Name:  "testissuer",
++						Kind:  "IssuerKind",
++						Group: "group.example.com",
++					},
++				},
++				Status: cmapi.CertificateStatus{
++					RenewalTime: &metav1.Time{Time: clock.Now().Add(time.Minute * -10)},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: "something",
++					Annotations: map[string]string{
++						cmapi.IssuerNameAnnotationKey:  "testissuer",
++						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
++						cmapi.IssuerGroupAnnotationKey: "group.example.com",
++					},
++				},
++				Data: map[string][]byte{
++					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
++					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
++						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
++						clock.Now().Add(time.Minute*-50),
++						clock.Now().Add(time.Minute*10),
++					),
++				},
++			},
++			reason:  Renewing,
++			message: "Renewing certificate as renewal was scheduled at 0001-01-01 00:00:00 +0000 UTC",
++			reissue: true,
++		},
++		"trigger renewal when certificate has already expired": {
++			certificate: &cmapi.Certificate{
++				Spec: cmapi.CertificateSpec{
++					CommonName: "example.com",
++					IssuerRef: cmmeta.IssuerReference{
++						Name:  "testissuer",
++						Kind:  "IssuerKind",
++						Group: "group.example.com",
++					},
++				},
++				Status: cmapi.CertificateStatus{
++					RenewalTime: &metav1.Time{Time: clock.Now().Add(time.Minute * -30)},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: "something",
++					Annotations: map[string]string{
++						cmapi.IssuerNameAnnotationKey:  "testissuer",
++						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
++						cmapi.IssuerGroupAnnotationKey: "group.example.com",
++					},
++				},
++				Data: map[string][]byte{
++					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
++					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
++						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
++						clock.Now().Add(time.Minute*-60),
++						clock.Now().Add(time.Minute*-5),
++					),
++				},
++			},
++			reason:  Renewing,
++			message: "Renewing certificate as renewal was scheduled at 0001-01-01 00:00:00 +0000 UTC",
++			reissue: true,
++		},
+ 	}
+ 	policyChain := NewTriggerPolicyChain(clock)
+ 	for name, test := range tests {
+diff --git a/pkg/util/pki/renewaltime.go b/pkg/util/pki/renewaltime.go
+index 1a8281021..ba8d4eef7 100644
+--- a/pkg/util/pki/renewaltime.go
++++ b/pkg/util/pki/renewaltime.go
+@@ -85,14 +85,20 @@ func desiredRenewalTime(actualDuration time.Duration, renewBefore *metav1.Durati
+ 	// If spec.renewBefore or spec.renewBeforePercentage was set (and is
+ 	// valid) respect that. We don't want to prevent users from renewing
+ 	// longer lived certs more frequently.
+-	if renewBefore != nil && renewBefore.Duration > 0 && renewBefore.Duration < actualDuration {
++	if renewBefore != nil && renewBefore.Duration > 0 && renewBefore.Duration <= actualDuration {
+ 		return renewBefore.Duration
+ 	} else if renewBeforePercentage != nil && *renewBeforePercentage > 0 && *renewBeforePercentage < 100 {
+ 		return actualDuration * time.Duration(*renewBeforePercentage) / 100
+ 	}
+ 
+ 	// Otherwise, default to renewing 2/3 through certificate's lifetime.
+-	return actualDuration / 3
++	// Ensure a minimum of 1 second to avoid renewal time being calculated
++	// exactly at NotAfter for very short-lived certificates.
++	renewBeforeDuration := actualDuration / 3
++	if renewBeforeDuration < time.Second {
++		renewBeforeDuration = time.Second
++	}
++	return renewBeforeDuration
+ }
+ 
+ // applyRenewBeforeWithWindows calculates effective renewal time with windows in it. We want the logic to be as follows:
+diff --git a/pkg/util/pki/renewaltime_test.go b/pkg/util/pki/renewaltime_test.go
+index b74b31873..4a69d4f59 100644
+--- a/pkg/util/pki/renewaltime_test.go
++++ b/pkg/util/pki/renewaltime_test.go
+@@ -135,6 +135,10 @@ func TestRenewBefore(t *testing.T) {
+ 			renewBefore:         &metav1.Duration{Duration: time.Hour * 4},
+ 			expectedRenewBefore: time.Hour,
+ 		},
++		"spec.renewBefore equals certificate duration (boundary case)": {
++			renewBefore:         &metav1.Duration{Duration: time.Hour * 3},
++			expectedRenewBefore: time.Hour * 3,
++		},
+ 	}
+ 	for n, s := range tests {
+ 		t.Run(n, func(t *testing.T) {
+@@ -144,6 +148,35 @@ func TestRenewBefore(t *testing.T) {
+ 	}
+ }
+ 
++func TestDesiredRenewalTimeMinimumDefault(t *testing.T) {
++	tests := map[string]struct {
++		actualDuration         time.Duration
++		renewBefore            *metav1.Duration
++		renewBeforePct         *int32
++		expectedRenewBefore    time.Duration
++	}{
++		"very short duration, default renewal should be at least 1 second": {
++			actualDuration:      time.Second * 2,
++			expectedRenewBefore: time.Second,
++		},
++		"very short duration, explicit renewBefore shorter than default": {
++			actualDuration:      time.Second * 2,
++			renewBefore:         &metav1.Duration{Duration: time.Millisecond * 500},
++			expectedRenewBefore: time.Millisecond * 500,
++		},
++		"normal duration, default renewal": {
++			actualDuration:      time.Hour * 3,
++			expectedRenewBefore: time.Hour,
++		},
++	}
++	for n, s := range tests {
++		t.Run(n, func(t *testing.T) {
++			renewBefore := desiredRenewalTime(s.actualDuration, s.renewBefore, s.renewBeforePct)
++			assert.Equal(t, s.expectedRenewBefore, renewBefore, fmt.Sprintf("Expected renewBefore time: %v got: %v", s.expectedRenewBefore, renewBefore))
++		})
++	}
++}
++
+ func midnightUTC(t time.Time) time.Time {
+ 	y, m, d := t.Date()
+ 
