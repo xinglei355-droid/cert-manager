@@ -543,6 +543,39 @@ func Test_NewTriggerPolicyChain(t *testing.T) {
 				},
 			},
 		},
+		"trigger renewal if certificate has expired": {
+			certificate: &cmapi.Certificate{
+				Spec: cmapi.CertificateSpec{
+					CommonName: "example.com",
+					IssuerRef: cmmeta.IssuerReference{
+						Name:  "testissuer",
+						Kind:  "IssuerKind",
+						Group: "group.example.com",
+					},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "something",
+					Annotations: map[string]string{
+						cmapi.IssuerNameAnnotationKey:  "testissuer",
+						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
+						cmapi.IssuerGroupAnnotationKey: "group.example.com",
+					},
+				},
+				Data: map[string][]byte{
+					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+						clock.Now().Add(time.Minute*-30),
+						// expired 5 minutes ago
+						clock.Now().Add(time.Minute*-5),
+					),
+				},
+			},
+			reason:  Expired,
+			message: "Certificate expired on 0000-12-31 23:59:00 +0000 UTC",
+			reissue: true,
+		},
 	}
 	policyChain := NewTriggerPolicyChain(clock)
 	for name, test := range tests {

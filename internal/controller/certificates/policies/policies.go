@@ -77,7 +77,8 @@ func NewTriggerPolicyChain(c clock.Clock) Chain {
 		SecretPrivateKeyMismatchesSpec,                      // Make sure the PrivateKey Type and Size match the Certificate spec
 		SecretPublicKeyDiffersFromCurrentCertificateRequest, // Make sure the Secret's PublicKey matches the current CertificateRequest
 		CurrentCertificateRequestMismatchesSpec,             // Make sure the current CertificateRequest matches the Certificate spec
-		CurrentCertificateNearingExpiry(c),                  // Make sure the Certificate in the Secret is not nearing expiry
+		CurrentCertificateHasExpired(c),                     // Make sure the Certificate has not expired
+		CurrentCertificateNearingExpiry(c),                  // Make sure the Certificate is not nearing expiry
 	}
 }
 
