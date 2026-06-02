@@ -1,0 +1,83 @@
+diff --git a/pkg/api/util/conditions.go b/pkg/api/util/conditions.go
+index df247f29c..841484efe 100644
+--- a/pkg/api/util/conditions.go
++++ b/pkg/api/util/conditions.go
+@@ -243,6 +243,8 @@ func RemoveCertificateCondition(crt *cmapi.Certificate, conditionType cmapi.Cert
+ //   - If a condition of the same type and different state already exists, the
+ //     condition will be updated and the LastTransitionTime set to the current
+ //     time.
++//   - If multiple conditions of the same type exist, they will all be removed
++//     and replaced with a single new condition.
+ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType cmapi.CertificateRequestConditionType, status cmmeta.ConditionStatus, reason, message string) {
+ 	newCondition := cmapi.CertificateRequestCondition{
+ 		Type:    conditionType,
+@@ -254,38 +256,50 @@ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType
+ 	nowTime := metav1.NewTime(Clock.Now())
+ 	newCondition.LastTransitionTime = &nowTime
+ 
+-	// Search through existing conditions
+-	for idx, cond := range cr.Status.Conditions {
+-		// Skip unrelated conditions
++	// 查找现有的条件，检查状态是否变化
++	var foundExisting bool
++	var existingStatus cmmeta.ConditionStatus
++	var existingLastTransitionTime *metav1.Time
++
++	// 构建新的条件列表，只保留非此类型的条件
++	var newConditions []cmapi.CertificateRequestCondition
++	for _, cond := range cr.Status.Conditions {
+ 		if cond.Type != conditionType {
++			newConditions = append(newConditions, cond)
+ 			continue
+ 		}
+ 
+-		// If this update doesn't contain a state transition, we don't update
+-		// the conditions LastTransitionTime to Now()
+-		if cond.Status == status {
+-			newCondition.LastTransitionTime = cond.LastTransitionTime
++		// 找到第一个此类型的条件，记录其状态和 LastTransitionTime
++		if !foundExisting {
++			foundExisting = true
++			existingStatus = cond.Status
++			existingLastTransitionTime = cond.LastTransitionTime
++		}
++		// 所有重复的同类型条件都不保留在 newConditions 中
++	}
++
++	// 如果找到了现有条件，检查是否需要更新 LastTransitionTime
++	if foundExisting {
++		if existingStatus == status {
++			newCondition.LastTransitionTime = existingLastTransitionTime
+ 		} else {
+ 			logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
+ 				"certificateRequest", klog.KObj(cr),
+ 				"condition", conditionType,
+-				"oldStatus", cond.Status,
++				"oldStatus", existingStatus,
+ 				"status", status,
+ 				"lastTransitionTime", nowTime.Time)
+ 		}
+-
+-		// Overwrite the existing condition
+-		cr.Status.Conditions[idx] = newCondition
+-		return
++	} else {
++		logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
++			"certificateRequest", klog.KObj(cr),
++			"condition", conditionType,
++			"lastTransitionTime", nowTime.Time)
+ 	}
+ 
+-	// If we've not found an existing condition of this type, we simply insert
+-	// the new condition into the slice.
+-	cr.Status.Conditions = append(cr.Status.Conditions, newCondition)
+-	logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
+-		"certificateRequest", klog.KObj(cr),
+-		"condition", conditionType,
+-		"lastTransitionTime", nowTime.Time)
++	// 添加新条件
++	newConditions = append(newConditions, newCondition)
++	cr.Status.Conditions = newConditions
+ }
+ 
+ // CertificateRequestHasCondition will return true if the given
