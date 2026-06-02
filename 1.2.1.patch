@@ -1,3 +1,92 @@
+diff --git a/1.2.1.patch b/1.2.1.patch
+new file mode 100644
+index 000000000..1968e536e
+--- /dev/null
++++ b/1.2.1.patch
+@@ -0,0 +1,83 @@
++diff --git a/pkg/api/util/conditions.go b/pkg/api/util/conditions.go
++index df247f29c..841484efe 100644
++--- a/pkg/api/util/conditions.go
+++++ b/pkg/api/util/conditions.go
++@@ -243,6 +243,8 @@ func RemoveCertificateCondition(crt *cmapi.Certificate, conditionType cmapi.Cert
++ //   - If a condition of the same type and different state already exists, the
++ //     condition will be updated and the LastTransitionTime set to the current
++ //     time.
+++//   - If multiple conditions of the same type exist, they will all be removed
+++//     and replaced with a single new condition.
++ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType cmapi.CertificateRequestConditionType, status cmmeta.ConditionStatus, reason, message string) {
++ 	newCondition := cmapi.CertificateRequestCondition{
++ 		Type:    conditionType,
++@@ -254,38 +256,50 @@ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType
++ 	nowTime := metav1.NewTime(Clock.Now())
++ 	newCondition.LastTransitionTime = &nowTime
++ 
++-	// Search through existing conditions
++-	for idx, cond := range cr.Status.Conditions {
++-		// Skip unrelated conditions
+++	// 查找现有的条件，检查状态是否变化
+++	var foundExisting bool
+++	var existingStatus cmmeta.ConditionStatus
+++	var existingLastTransitionTime *metav1.Time
+++
+++	// 构建新的条件列表，只保留非此类型的条件
+++	var newConditions []cmapi.CertificateRequestCondition
+++	for _, cond := range cr.Status.Conditions {
++ 		if cond.Type != conditionType {
+++			newConditions = append(newConditions, cond)
++ 			continue
++ 		}
++ 
++-		// If this update doesn't contain a state transition, we don't update
++-		// the conditions LastTransitionTime to Now()
++-		if cond.Status == status {
++-			newCondition.LastTransitionTime = cond.LastTransitionTime
+++		// 找到第一个此类型的条件，记录其状态和 LastTransitionTime
+++		if !foundExisting {
+++			foundExisting = true
+++			existingStatus = cond.Status
+++			existingLastTransitionTime = cond.LastTransitionTime
+++		}
+++		// 所有重复的同类型条件都不保留在 newConditions 中
+++	}
+++
+++	// 如果找到了现有条件，检查是否需要更新 LastTransitionTime
+++	if foundExisting {
+++		if existingStatus == status {
+++			newCondition.LastTransitionTime = existingLastTransitionTime
++ 		} else {
++ 			logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
++ 				"certificateRequest", klog.KObj(cr),
++ 				"condition", conditionType,
++-				"oldStatus", cond.Status,
+++				"oldStatus", existingStatus,
++ 				"status", status,
++ 				"lastTransitionTime", nowTime.Time)
++ 		}
++-
++-		// Overwrite the existing condition
++-		cr.Status.Conditions[idx] = newCondition
++-		return
+++	} else {
+++		logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
+++			"certificateRequest", klog.KObj(cr),
+++			"condition", conditionType,
+++			"lastTransitionTime", nowTime.Time)
++ 	}
++ 
++-	// If we've not found an existing condition of this type, we simply insert
++-	// the new condition into the slice.
++-	cr.Status.Conditions = append(cr.Status.Conditions, newCondition)
++-	logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
++-		"certificateRequest", klog.KObj(cr),
++-		"condition", conditionType,
++-		"lastTransitionTime", nowTime.Time)
+++	// 添加新条件
+++	newConditions = append(newConditions, newCondition)
+++	cr.Status.Conditions = newConditions
++ }
++ 
++ // CertificateRequestHasCondition will return true if the given
 diff --git a/pkg/api/util/conditions.go b/pkg/api/util/conditions.go
 index df247f29c..841484efe 100644
 --- a/pkg/api/util/conditions.go
@@ -81,3 +170,231 @@ index df247f29c..841484efe 100644
  }
  
  // CertificateRequestHasCondition will return true if the given
+diff --git a/pkg/api/util/conditions_test.go b/pkg/api/util/conditions_test.go
+new file mode 100644
+index 000000000..71ce9c695
+--- /dev/null
++++ b/pkg/api/util/conditions_test.go
+@@ -0,0 +1,222 @@
++
++package util
++
++import (
++	"testing"
++	"time"
++
++	"github.com/stretchr/testify/assert"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/utils/clock/testing"
++
++	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++)
++
++func TestSetCertificateRequestCondition(t *testing.T) {
++	testCases := []struct {
++		name             string
++		initialCR        *cmapi.CertificateRequest
++		conditionType    cmapi.CertificateRequestConditionType
++		status           cmmeta.ConditionStatus
++		reason           string
++		message          string
++		expectedCR       *cmapi.CertificateRequest
++		expectTransition bool
++	}{
++		{
++			name: "添加新的 Approved 条件",
++			initialCR: &cmapi.CertificateRequest{
++				ObjectMeta: metav1.ObjectMeta{Name: "test-cr"},
++			},
++			conditionType: cmapi.CertificateRequestConditionApproved,
++			status:        cmmeta.ConditionTrue,
++			reason:        "cert-manager.io",
++			message:       "已批准",
++			expectTransition: true,
++		},
++		{
++			name: "添加新的 Denied 条件",
++			initialCR: &cmapi.CertificateRequest{
++				ObjectMeta: metav1.ObjectMeta{Name: "test-cr"},
++			},
++			conditionType: cmapi.CertificateRequestConditionDenied,
++			status:        cmmeta.ConditionTrue,
++			reason:        "cert-manager.io",
++			message:       "已拒绝",
++			expectTransition: true,
++		},
++		{
++			name: "添加新的 Ready=False 条件",
++			initialCR: &cmapi.CertificateRequest{
++				ObjectMeta: metav1.ObjectMeta{Name: "test-cr"},
++			},
++			conditionType: cmapi.CertificateRequestConditionReady,
++			status:        cmmeta.ConditionFalse,
++			reason:        cmapi.CertificateRequestReasonPending,
++			message:       "等待中",
++			expectTransition: true,
++		},
++		{
++			name: "添加新的 Ready=True 条件",
++			initialCR: &cmapi.CertificateRequest{
++				ObjectMeta: metav1.ObjectMeta{Name: "test-cr"},
++			},
++			conditionType: cmapi.CertificateRequestConditionReady,
++			status:        cmmeta.ConditionTrue,
++			reason:        cmapi.CertificateRequestReasonIssued,
++			message:       "已颁发",
++			expectTransition: true,
++		},
++		{
++			name: "更新现有条件，状态相同",
++			initialCR: &cmapi.CertificateRequest{
++				ObjectMeta: metav1.ObjectMeta{Name: "test-cr"},
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             cmapi.CertificateRequestReasonPending,
++							Message:            "等待中",
++							LastTransitionTime: &metav1.Time{Time: time.Now().Add(-time.Hour)},
++						},
++					},
++				},
++			},
++			conditionType: cmapi.CertificateRequestConditionReady,
++			status:        cmmeta.ConditionFalse,
++			reason:        cmapi.CertificateRequestReasonPending,
++			message:       "更新等待中",
++			expectTransition: false, // 状态相同，不应该更新 LastTransitionTime
++		},
++		{
++			name: "更新现有条件，状态不同",
++			initialCR: &cmapi.CertificateRequest{
++				ObjectMeta: metav1.ObjectMeta{Name: "test-cr"},
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             cmapi.CertificateRequestReasonPending,
++							Message:            "等待中",
++							LastTransitionTime: &metav1.Time{Time: time.Now().Add(-time.Hour)},
++						},
++					},
++				},
++			},
++			conditionType: cmapi.CertificateRequestConditionReady,
++			status:        cmmeta.ConditionTrue,
++			reason:        cmapi.CertificateRequestReasonIssued,
++			message:       "已颁发",
++			expectTransition: true, // 状态不同，应该更新 LastTransitionTime
++		},
++		{
++			name: "修复重复条件的问题",
++			initialCR: &cmapi.CertificateRequest{
++				ObjectMeta: metav1.ObjectMeta{Name: "test-cr"},
++				Status: cmapi.CertificateRequestStatus{
++					Conditions: []cmapi.CertificateRequestCondition{
++						{
++							Type:               cmapi.CertificateRequestConditionReady,
++							Status:             cmmeta.ConditionFalse,
++							Reason:             cmapi.CertificateRequestReasonPending,
++							Message:            "等待中 1",
++							LastTransitionTime: &metav1.Time{Time: time.Now().Add(-2 * time.Hour)},
++						},
++						{
++							Type:               cmapi.CertificateRequestConditionReady, // 重复的条件！
++							Status:             cmmeta.ConditionFalse,
++							Reason:             cmapi.CertificateRequestReasonFailed,
++							Message:            "失败了 2",
++							LastTransitionTime: &metav1.Time{Time: time.Now().Add(-time.Hour)},
++						},
++						{
++							Type:               cmapi.CertificateRequestConditionApproved, // 另一个类型的条件，应该保留
++							Status:             cmmeta.ConditionTrue,
++							Reason:             "cert-manager.io",
++							Message:            "已批准",
++							LastTransitionTime: &metav1.Time{Time: time.Now().Add(-3 * time.Hour)},
++						},
++					},
++				},
++			},
++			conditionType: cmapi.CertificateRequestConditionReady,
++			status:        cmmeta.ConditionTrue,
++			reason:        cmapi.CertificateRequestReasonIssued,
++			message:       "已颁发",
++			expectTransition: true,
++		},
++	}
++
++	for _, tc := range testCases {
++		t.Run(tc.name, func(t *testing.T) {
++			// 设置固定时钟
++			fixedClock := testing.NewFakeClock(time.Now())
++			Clock = fixedClock
++
++			// 复制初始 CR 以避免影响其他测试
++			cr := tc.initialCR.DeepCopy()
++
++			// 调用函数
++			SetCertificateRequestCondition(cr, tc.conditionType, tc.status, tc.reason, tc.message)
++
++			// 验证结果
++			assert.Len(t, cr.Status.Conditions, len(tc.initialCR.Status.Conditions)-countDuplicateConditions(tc.initialCR, tc.conditionType)+1)
++
++			// 检查新添加或更新的条件
++			found := false
++			for _, cond := range cr.Status.Conditions {
++				if cond.Type == tc.conditionType {
++					found = true
++					assert.Equal(t, tc.status, cond.Status)
++					assert.Equal(t, tc.reason, cond.Reason)
++					assert.Equal(t, tc.message, cond.Message)
++
++					if tc.expectTransition {
++						// 状态变更了，LastTransitionTime 应该是当前固定时间
++						assert.Equal(t, metav1.NewTime(fixedClock.Now()), *cond.LastTransitionTime)
++					} else {
++						// 状态未变更，LastTransitionTime 应该保持原样
++						originalCond := findCondition(tc.initialCR, tc.conditionType)
++						if originalCond != nil {
++							assert.Equal(t, originalCond.LastTransitionTime, cond.LastTransitionTime)
++						}
++					}
++				} else {
++					// 其他类型的条件应该保持不变
++					originalCond := findCondition(tc.initialCR, cond.Type)
++					if originalCond != nil {
++						assert.Equal(t, *originalCond, cond)
++					}
++				}
++			}
++			assert.True(t, found, "应该找到设置的条件")
++		})
++	}
++}
++
++// 辅助函数：计算初始 CR 中特定类型条件的数量
++func countDuplicateConditions(cr *cmapi.CertificateRequest, conditionType cmapi.CertificateRequestConditionType) int {
++	count := 0
++	for _, cond := range cr.Status.Conditions {
++		if cond.Type == conditionType {
++			count++
++		}
++	}
++	if count == 0 {
++		return 0
++	}
++	return count // 返回所有匹配的条件数，它们会被替换为 1 个新条件
++}
++
++// 辅助函数：在 CR 中查找特定类型的第一个条件
++func findCondition(cr *cmapi.CertificateRequest, conditionType cmapi.CertificateRequestConditionType) *cmapi.CertificateRequestCondition {
++	for i := range cr.Status.Conditions {
++		if cr.Status.Conditions[i].Type == conditionType {
++			return &cr.Status.Conditions[i]
++		}
++	}
++	return nil
++}
