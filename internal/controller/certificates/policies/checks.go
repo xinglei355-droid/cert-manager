@@ -279,9 +279,16 @@ func CurrentCertificateNearingExpiry(c clock.Clock) Func {
 			reason = WindowError
 			message = err.Error()
 		}
+		if renewalTime == nil {
+			return "", "", false
+		}
 
-		renewIn := renewalTime.Time.Sub(c.Now())
-		if renewIn > 0 {
+		now := c.Now()
+		if !now.Before(notAfter.Time) {
+			return reason, fmt.Sprintf("Renewing certificate as it reached expiry at %s", x509Cert.NotAfter.Format(time.RFC1123)), true
+		}
+
+		if renewalTime.Time.After(now) {
 			// renewal time is in the future, no need to renew
 			return "", "", false
 		}
