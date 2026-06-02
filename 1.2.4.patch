@@ -1,0 +1,338 @@
+diff --git a/pkg/api/util/conditions.go b/pkg/api/util/conditions.go
+index df247f29c..cc11f1a7d 100644
+--- a/pkg/api/util/conditions.go
++++ b/pkg/api/util/conditions.go
+@@ -238,11 +238,14 @@ func RemoveCertificateCondition(crt *cmapi.Certificate, conditionType cmapi.Cert
+ // SetCertificateRequestCondition will set a 'condition' on the given CertificateRequest.
+ //   - If no condition of the same type already exists, the condition will be
+ //     inserted with the LastTransitionTime set to the current time.
+-//   - If a condition of the same type and state already exists, the condition
+-//     will be updated but the LastTransitionTime will not be modified.
+-//   - If a condition of the same type and different state already exists, the
+-//     condition will be updated and the LastTransitionTime set to the current
+-//     time.
++//   - If a condition of the same type, state and reason already exists, the
++//     condition will be updated but the LastTransitionTime will not be modified.
++//   - If a condition of the same type and different state or different reason
++//     already exists, the condition will be updated and the LastTransitionTime
++//     set to the current time.
++//   - Any duplicate conditions of the same type (which should never exist but
++//     could arise from concurrent field manager operations) will be removed so
++//     that only the new single condition of this type remains.
+ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType cmapi.CertificateRequestConditionType, status cmmeta.ConditionStatus, reason, message string) {
+ 	newCondition := cmapi.CertificateRequestCondition{
+ 		Type:    conditionType,
+@@ -254,38 +257,48 @@ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType
+ 	nowTime := metav1.NewTime(Clock.Now())
+ 	newCondition.LastTransitionTime = &nowTime
+ 
+-	// Search through existing conditions
+-	for idx, cond := range cr.Status.Conditions {
+-		// Skip unrelated conditions
++	// Remove all existing conditions of the same type and keep unrelated ones.
++	// This ensures we never have duplicate conditions of the same type and that
++	// the condition list always reflects a single, consistent state.
++	var foundExisting *cmapi.CertificateRequestCondition
++	updatedConditions := make([]cmapi.CertificateRequestCondition, 0, len(cr.Status.Conditions))
++	for _, cond := range cr.Status.Conditions {
+ 		if cond.Type != conditionType {
+-			continue
++			updatedConditions = append(updatedConditions, cond)
++		} else {
++			// Track the first existing condition we encounter to determine
++			// whether this is a state transition.
++			if foundExisting == nil {
++				copyCond := cond
++				foundExisting = &copyCond
++			}
+ 		}
++	}
+ 
+-		// If this update doesn't contain a state transition, we don't update
+-		// the conditions LastTransitionTime to Now()
+-		if cond.Status == status {
+-			newCondition.LastTransitionTime = cond.LastTransitionTime
++	if foundExisting != nil {
++		// If this update doesn't contain a state or reason transition, preserve
++		// the original LastTransitionTime.
++		if foundExisting.Status == status && foundExisting.Reason == reason {
++			newCondition.LastTransitionTime = foundExisting.LastTransitionTime
+ 		} else {
+-			logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
++			logf.Log.V(logf.InfoLevel).Info("Found status or reason change for CertificateRequest condition; setting lastTransitionTime",
+ 				"certificateRequest", klog.KObj(cr),
+ 				"condition", conditionType,
+-				"oldStatus", cond.Status,
++				"oldStatus", foundExisting.Status,
++				"oldReason", foundExisting.Reason,
+ 				"status", status,
++				"reason", reason,
+ 				"lastTransitionTime", nowTime.Time)
+ 		}
+-
+-		// Overwrite the existing condition
+-		cr.Status.Conditions[idx] = newCondition
+-		return
++	} else {
++		logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
++			"certificateRequest", klog.KObj(cr),
++			"condition", conditionType,
++			"lastTransitionTime", nowTime.Time)
+ 	}
+ 
+-	// If we've not found an existing condition of this type, we simply insert
+-	// the new condition into the slice.
+-	cr.Status.Conditions = append(cr.Status.Conditions, newCondition)
+-	logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
+-		"certificateRequest", klog.KObj(cr),
+-		"condition", conditionType,
+-		"lastTransitionTime", nowTime.Time)
++	updatedConditions = append(updatedConditions, newCondition)
++	cr.Status.Conditions = updatedConditions
+ }
+ 
+ // CertificateRequestHasCondition will return true if the given
+diff --git a/pkg/controller/certificaterequests/util/reporter_test.go b/pkg/controller/certificaterequests/util/reporter_test.go
+index 0c663c30d..cd3c5322b 100644
+--- a/pkg/controller/certificaterequests/util/reporter_test.go
++++ b/pkg/controller/certificaterequests/util/reporter_test.go
+@@ -28,6 +28,7 @@ import (
+ 	"github.com/cert-manager/cert-manager/internal/test/testutil"
+ 	apiutil "github.com/cert-manager/cert-manager/pkg/api/util"
+ 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+ 	controllertest "github.com/cert-manager/cert-manager/pkg/controller/test"
+ 	"github.com/cert-manager/cert-manager/test/unit/gen"
+ )
+@@ -244,6 +245,231 @@ func TestReporter(t *testing.T) {
+ 	}
+ }
+ 
++func TestReporterStateTransitions(t *testing.T) {
++	nowMetaTime := metav1.NewTime(fixedClockStart)
++	laterMetaTime := metav1.NewTime(fixedClockStart.Add(1 * time.Second))
++
++	baseCR := gen.CertificateRequest("test")
++
++	approvedCondition := cmapi.CertificateRequestCondition{
++		Type:               cmapi.CertificateRequestConditionApproved,
++		Status:             cmmeta.ConditionTrue,
++		Reason:             "cert-manager.io",
++		Message:            "Certificate request has been approved by cert-manager.io",
++		LastTransitionTime: &nowMetaTime,
++	}
++
++	deniedCondition := cmapi.CertificateRequestCondition{
++		Type:               cmapi.CertificateRequestConditionDenied,
++		Status:             cmmeta.ConditionTrue,
++		Reason:             "cert-manager.io",
++		Message:            "Certificate request has been denied by cert-manager.io",
++		LastTransitionTime: &nowMetaTime,
++	}
++
++	pendingCondition := cmapi.CertificateRequestCondition{
++		Type:               cmapi.CertificateRequestConditionReady,
++		Status:             cmmeta.ConditionFalse,
++		Reason:             "Pending",
++		Message:            "Referenced issuer not found",
++		LastTransitionTime: &nowMetaTime,
++	}
++
++	failedCondition := cmapi.CertificateRequestCondition{
++		Type:               cmapi.CertificateRequestConditionReady,
++		Status:             cmmeta.ConditionFalse,
++		Reason:             "Failed",
++		Message:            "Failed to decode certificate: error",
++		LastTransitionTime: &laterMetaTime,
++	}
++
++	deniedReadyCondition := cmapi.CertificateRequestCondition{
++		Type:               cmapi.CertificateRequestConditionReady,
++		Status:             cmmeta.ConditionFalse,
++		Reason:             "Denied",
++		Message:            "The CertificateRequest was denied by an approval controller",
++		LastTransitionTime: &nowMetaTime,
++	}
++
++	readyCondition := cmapi.CertificateRequestCondition{
++		Type:               cmapi.CertificateRequestConditionReady,
++		Status:             cmmeta.ConditionTrue,
++		Reason:             "Issued",
++		Message:            "Certificate fetched from issuer successfully",
++		LastTransitionTime: &laterMetaTime,
++	}
++
++	tests := map[string]struct {
++		cr                *cmapi.CertificateRequest
++		steps             []func(*Reporter, *cmapi.CertificateRequest)
++		expectedEvents    []string
++		expectedCondition []cmapi.CertificateRequestCondition
++	}{
++		"Approved condition is set and remains unchanged when Ready condition transitions": {
++			cr: gen.CertificateRequestFrom(baseCR,
++				gen.SetCertificateRequestStatusCondition(approvedCondition),
++			),
++			steps: []func(*Reporter, *cmapi.CertificateRequest){
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					r.Pending(cr, nil, "IssuerNotFound", "Referenced issuer not found")
++				},
++			},
++			expectedEvents: []string{
++				"Normal IssuerNotFound Referenced issuer not found",
++			},
++			expectedCondition: []cmapi.CertificateRequestCondition{
++				approvedCondition,
++				pendingCondition,
++			},
++		},
++		"Denied condition is set alongside Ready=False/Denied": {
++			cr: gen.CertificateRequestFrom(baseCR,
++				gen.SetCertificateRequestStatusCondition(deniedCondition),
++			),
++			steps: []func(*Reporter, *cmapi.CertificateRequest){
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					r.Denied(cr)
++				},
++			},
++			expectedEvents: []string{},
++			expectedCondition: []cmapi.CertificateRequestCondition{
++				deniedCondition,
++				deniedReadyCondition,
++			},
++		},
++		"Ready=False transitions from Pending to Failed overwrites condition and updates LastTransitionTime": {
++			cr: gen.CertificateRequestFrom(baseCR,
++				gen.SetCertificateRequestStatusCondition(pendingCondition),
++			),
++			steps: []func(*Reporter, *cmapi.CertificateRequest){
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					fixedClock.SetTime(fixedClockStart.Add(1 * time.Second))
++					apiutil.Clock = fixedClock
++					r.Failed(cr, errors.New("error"), "Failed", "Failed to decode certificate")
++				},
++			},
++			expectedEvents: []string{
++				"Warning Failed Failed to decode certificate: error",
++			},
++			expectedCondition: []cmapi.CertificateRequestCondition{
++				failedCondition,
++			},
++		},
++		"Ready=False transitions from Pending to Denied overwrites condition and updates LastTransitionTime": {
++			cr: gen.CertificateRequestFrom(baseCR,
++				gen.SetCertificateRequestStatusCondition(pendingCondition),
++			),
++			steps: []func(*Reporter, *cmapi.CertificateRequest){
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					fixedClock.SetTime(fixedClockStart.Add(1 * time.Second))
++					apiutil.Clock = fixedClock
++					r.Denied(cr)
++				},
++			},
++			expectedEvents: []string{},
++			expectedCondition: []cmapi.CertificateRequestCondition{
++				{
++					Type:               cmapi.CertificateRequestConditionReady,
++					Status:             cmmeta.ConditionFalse,
++					Reason:             "Denied",
++					Message:            "The CertificateRequest was denied by an approval controller",
++					LastTransitionTime: &laterMetaTime,
++				},
++			},
++		},
++		"Ready=False to Ready=True transition overwrites condition and updates LastTransitionTime": {
++			cr: gen.CertificateRequestFrom(baseCR,
++				gen.SetCertificateRequestStatusCondition(pendingCondition),
++			),
++			steps: []func(*Reporter, *cmapi.CertificateRequest){
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					fixedClock.SetTime(fixedClockStart.Add(1 * time.Second))
++					apiutil.Clock = fixedClock
++					r.Ready(cr)
++				},
++			},
++			expectedEvents: []string{
++				"Normal CertificateIssued Certificate fetched from issuer successfully",
++			},
++			expectedCondition: []cmapi.CertificateRequestCondition{
++				readyCondition,
++			},
++		},
++		"Ready=True to Ready=False transition overwrites condition and updates LastTransitionTime": {
++			cr: gen.CertificateRequestFrom(baseCR,
++				gen.SetCertificateRequestStatusCondition(readyCondition),
++			),
++			steps: []func(*Reporter, *cmapi.CertificateRequest){
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					fixedClock.SetTime(fixedClockStart.Add(2 * time.Second))
++					apiutil.Clock = fixedClock
++					r.Failed(cr, errors.New("error"), "Failed", "Failed to decode certificate")
++				},
++			},
++			expectedEvents: []string{
++				"Warning Failed Failed to decode certificate: error",
++			},
++			expectedCondition: []cmapi.CertificateRequestCondition{
++				{
++					Type:               cmapi.CertificateRequestConditionReady,
++					Status:             cmmeta.ConditionFalse,
++					Reason:             "Failed",
++					Message:            "Failed to decode certificate: error",
++					LastTransitionTime: &metav1.Time{Time: fixedClockStart.Add(2 * time.Second)},
++				},
++			},
++		},
++		"multiple calls to same method do not duplicate conditions": {
++			cr: gen.CertificateRequestFrom(baseCR),
++			steps: []func(*Reporter, *cmapi.CertificateRequest){
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					r.Pending(cr, nil, "IssuerNotFound", "first call")
++				},
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					r.Pending(cr, nil, "IssuerNotFound", "second call")
++				},
++				func(r *Reporter, cr *cmapi.CertificateRequest) {
++					r.Pending(cr, nil, "IssuerNotFound", "third call")
++				},
++			},
++			expectedEvents: []string{
++				"Normal IssuerNotFound first call",
++			},
++			expectedCondition: []cmapi.CertificateRequestCondition{
++				{
++					Type:               cmapi.CertificateRequestConditionReady,
++					Status:             cmmeta.ConditionFalse,
++					Reason:             "Pending",
++					Message:            "third call",
++					LastTransitionTime: &nowMetaTime,
++				},
++			},
++		},
++	}
++
++	for name, test := range tests {
++		t.Run(name, func(t *testing.T) {
++			fixedClock.SetTime(fixedClockStart)
++			apiutil.Clock = fixedClock
++			recorder := new(controllertest.FakeRecorder)
++			reporter := NewReporter(fixedClock, recorder)
++
++			for _, step := range test.steps {
++				step(reporter, test.cr)
++			}
++
++			if diffErr := testutil.Diff(test.expectedCondition, test.cr.Status.Conditions); diffErr != nil {
++				t.Errorf("unexpected conditions:\n%s", diffErr)
++			}
++
++			if !slices.Equal(test.expectedEvents, recorder.Events) {
++				t.Errorf("unexpected events, exp=%+v got=%+v",
++					test.expectedEvents, recorder.Events)
++			}
++		})
++	}
++}
++
+ func (tt *reporterT) runTest(t *testing.T) {
+ 	recorder := new(controllertest.FakeRecorder)
+ 	reporter := NewReporter(fixedClock, recorder)
