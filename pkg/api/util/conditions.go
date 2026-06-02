@@ -254,34 +254,42 @@ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType 
 	nowTime := metav1.NewTime(Clock.Now())
 	newCondition.LastTransitionTime = &nowTime
 
-	// Search through existing conditions
-	for idx, cond := range cr.Status.Conditions {
-		// Skip unrelated conditions
+	updatedConditions := make([]cmapi.CertificateRequestCondition, 0, len(cr.Status.Conditions))
+	matchedConditionIndex := -1
+	var existingCondition *cmapi.CertificateRequestCondition
+
+	for _, cond := range cr.Status.Conditions {
 		if cond.Type != conditionType {
+			updatedConditions = append(updatedConditions, cond)
 			continue
 		}
 
-		// If this update doesn't contain a state transition, we don't update
-		// the conditions LastTransitionTime to Now()
-		if cond.Status == status {
-			newCondition.LastTransitionTime = cond.LastTransitionTime
+		if existingCondition == nil {
+			condCopy := cond
+			existingCondition = &condCopy
+			matchedConditionIndex = len(updatedConditions)
+			updatedConditions = append(updatedConditions, cmapi.CertificateRequestCondition{})
+		}
+	}
+
+	if existingCondition != nil {
+		if existingCondition.Status == status {
+			newCondition.LastTransitionTime = existingCondition.LastTransitionTime
 		} else {
 			logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
 				"certificateRequest", klog.KObj(cr),
 				"condition", conditionType,
-				"oldStatus", cond.Status,
+				"oldStatus", existingCondition.Status,
 				"status", status,
 				"lastTransitionTime", nowTime.Time)
 		}
 
-		// Overwrite the existing condition
-		cr.Status.Conditions[idx] = newCondition
+		updatedConditions[matchedConditionIndex] = newCondition
+		cr.Status.Conditions = updatedConditions
 		return
 	}
 
-	// If we've not found an existing condition of this type, we simply insert
-	// the new condition into the slice.
-	cr.Status.Conditions = append(cr.Status.Conditions, newCondition)
+	cr.Status.Conditions = append(updatedConditions, newCondition)
 	logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
 		"certificateRequest", klog.KObj(cr),
 		"condition", conditionType,
@@ -309,24 +317,30 @@ func CertificateRequestHasCondition(cr *cmapi.CertificateRequest, c cmapi.Certif
 	return false
 }
 
-// This returns the status reason of a CertificateRequest. The order of reason
-// hierarchy is 'Failed' -> 'Ready' -> 'Pending' -> ”
+// CertificateRequestReadyReason returns the Ready condition reason only when it
+// matches the current Ready status.
 func CertificateRequestReadyReason(cr *cmapi.CertificateRequest) string {
-	for _, reason := range []string{
-		cmapi.CertificateRequestReasonFailed,
-		cmapi.CertificateRequestReasonIssued,
-		cmapi.CertificateRequestReasonPending,
-		cmapi.CertificateRequestReasonDenied,
-	} {
-		for _, con := range cr.Status.Conditions {
-			if con.Type == cmapi.CertificateRequestConditionReady &&
-				con.Reason == reason {
-				return reason
-			}
-		}
+	if cr == nil {
+		return ""
 	}
 
-	return ""
+	condition := GetCertificateRequestCondition(cr, cmapi.CertificateRequestConditionReady)
+	if condition == nil {
+		return ""
+	}
+
+	switch {
+	case condition.Status == cmmeta.ConditionFalse && condition.Reason == cmapi.CertificateRequestReasonFailed:
+		return condition.Reason
+	case condition.Status == cmmeta.ConditionTrue && condition.Reason == cmapi.CertificateRequestReasonIssued:
+		return condition.Reason
+	case condition.Status == cmmeta.ConditionFalse && condition.Reason == cmapi.CertificateRequestReasonPending:
+		return condition.Reason
+	case condition.Status == cmmeta.ConditionFalse && condition.Reason == cmapi.CertificateRequestReasonDenied:
+		return condition.Reason
+	default:
+		return ""
+	}
 }
 
 // This returns with the message if the CertificateRequest contains an

@@ -1,0 +1,297 @@
+diff --git a/pkg/api/util/conditions.go b/pkg/api/util/conditions.go
+index df247f29c..ce146b35b 100644
+--- a/pkg/api/util/conditions.go
++++ b/pkg/api/util/conditions.go
+@@ -254,34 +254,42 @@ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType
+ 	nowTime := metav1.NewTime(Clock.Now())
+ 	newCondition.LastTransitionTime = &nowTime
+ 
+-	// Search through existing conditions
+-	for idx, cond := range cr.Status.Conditions {
+-		// Skip unrelated conditions
++	updatedConditions := make([]cmapi.CertificateRequestCondition, 0, len(cr.Status.Conditions))
++	matchedConditionIndex := -1
++	var existingCondition *cmapi.CertificateRequestCondition
++
++	for _, cond := range cr.Status.Conditions {
+ 		if cond.Type != conditionType {
++			updatedConditions = append(updatedConditions, cond)
+ 			continue
+ 		}
+ 
+-		// If this update doesn't contain a state transition, we don't update
+-		// the conditions LastTransitionTime to Now()
+-		if cond.Status == status {
+-			newCondition.LastTransitionTime = cond.LastTransitionTime
++		if existingCondition == nil {
++			condCopy := cond
++			existingCondition = &condCopy
++			matchedConditionIndex = len(updatedConditions)
++			updatedConditions = append(updatedConditions, cmapi.CertificateRequestCondition{})
++		}
++	}
++
++	if existingCondition != nil {
++		if existingCondition.Status == status {
++			newCondition.LastTransitionTime = existingCondition.LastTransitionTime
+ 		} else {
+ 			logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
+ 				"certificateRequest", klog.KObj(cr),
+ 				"condition", conditionType,
+-				"oldStatus", cond.Status,
++				"oldStatus", existingCondition.Status,
+ 				"status", status,
+ 				"lastTransitionTime", nowTime.Time)
+ 		}
+ 
+-		// Overwrite the existing condition
+-		cr.Status.Conditions[idx] = newCondition
++		updatedConditions[matchedConditionIndex] = newCondition
++		cr.Status.Conditions = updatedConditions
+ 		return
+ 	}
+ 
+-	// If we've not found an existing condition of this type, we simply insert
+-	// the new condition into the slice.
+-	cr.Status.Conditions = append(cr.Status.Conditions, newCondition)
++	cr.Status.Conditions = append(updatedConditions, newCondition)
+ 	logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
+ 		"certificateRequest", klog.KObj(cr),
+ 		"condition", conditionType,
+@@ -309,24 +317,30 @@ func CertificateRequestHasCondition(cr *cmapi.CertificateRequest, c cmapi.Certif
+ 	return false
+ }
+ 
+-// This returns the status reason of a CertificateRequest. The order of reason
+-// hierarchy is 'Failed' -> 'Ready' -> 'Pending' -> ”
++// CertificateRequestReadyReason returns the Ready condition reason only when it
++// matches the current Ready status.
+ func CertificateRequestReadyReason(cr *cmapi.CertificateRequest) string {
+-	for _, reason := range []string{
+-		cmapi.CertificateRequestReasonFailed,
+-		cmapi.CertificateRequestReasonIssued,
+-		cmapi.CertificateRequestReasonPending,
+-		cmapi.CertificateRequestReasonDenied,
+-	} {
+-		for _, con := range cr.Status.Conditions {
+-			if con.Type == cmapi.CertificateRequestConditionReady &&
+-				con.Reason == reason {
+-				return reason
+-			}
+-		}
++	if cr == nil {
++		return ""
+ 	}
+ 
+-	return ""
++	condition := GetCertificateRequestCondition(cr, cmapi.CertificateRequestConditionReady)
++	if condition == nil {
++		return ""
++	}
++
++	switch {
++	case condition.Status == cmmeta.ConditionFalse && condition.Reason == cmapi.CertificateRequestReasonFailed:
++		return condition.Reason
++	case condition.Status == cmmeta.ConditionTrue && condition.Reason == cmapi.CertificateRequestReasonIssued:
++		return condition.Reason
++	case condition.Status == cmmeta.ConditionFalse && condition.Reason == cmapi.CertificateRequestReasonPending:
++		return condition.Reason
++	case condition.Status == cmmeta.ConditionFalse && condition.Reason == cmapi.CertificateRequestReasonDenied:
++		return condition.Reason
++	default:
++		return ""
++	}
+ }
+ 
+ // This returns with the message if the CertificateRequest contains an
+diff --git a/pkg/controller/certificaterequests/approver/approver_test.go b/pkg/controller/certificaterequests/approver/approver_test.go
+index 68aa614a5..cbc8f5113 100644
+--- a/pkg/controller/certificaterequests/approver/approver_test.go
++++ b/pkg/controller/certificaterequests/approver/approver_test.go
+@@ -28,12 +28,37 @@ import (
+ 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+ 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+ 	testpkg "github.com/cert-manager/cert-manager/pkg/controller/test"
++	"github.com/cert-manager/cert-manager/test/unit/gen"
+ )
+ 
+ func TestProcessItem(t *testing.T) {
+ 	// now time is the current time at the start of the test (the clock is fixed)
+ 	now := time.Now()
+ 	metaNow := metav1.NewTime(now)
++
++	requestWithDuplicateApprovedConditions := gen.CertificateRequest("test")
++	requestWithDuplicateApprovedConditions.Status.Conditions = []cmapi.CertificateRequestCondition{
++		{
++			Type:   cmapi.CertificateRequestConditionReady,
++			Status: cmmeta.ConditionFalse,
++			Reason: cmapi.CertificateRequestReasonPending,
++		},
++		{
++			Type:               cmapi.CertificateRequestConditionApproved,
++			Status:             cmmeta.ConditionFalse,
++			Reason:             "old-approver",
++			Message:            "stale approval",
++			LastTransitionTime: &metaNow,
++		},
++		{
++			Type:               cmapi.CertificateRequestConditionApproved,
++			Status:             cmmeta.ConditionFalse,
++			Reason:             "duplicate-approver",
++			Message:            "duplicate stale approval",
++			LastTransitionTime: &metaNow,
++		},
++	}
++
+ 	tests := map[string]struct {
+ 		// key that should be passed to ProcessItem.
+ 		// if not set, the 'namespace/name' of the 'CertificateRequest' field will be used.
+@@ -170,6 +195,24 @@ func TestProcessItem(t *testing.T) {
+ 			},
+ 			expectedEvent: "Normal cert-manager.io Certificate request has been approved by cert-manager.io",
+ 		},
++		"approve CertificateRequest replaces duplicate Approved conditions": {
++			request: requestWithDuplicateApprovedConditions,
++			expectedConditions: []cmapi.CertificateRequestCondition{
++				{
++					Type:   cmapi.CertificateRequestConditionReady,
++					Status: cmmeta.ConditionFalse,
++					Reason: cmapi.CertificateRequestReasonPending,
++				},
++				{
++					Type:               cmapi.CertificateRequestConditionApproved,
++					Status:             cmmeta.ConditionTrue,
++					Reason:             "cert-manager.io",
++					Message:            ApprovedMessage,
++					LastTransitionTime: &metaNow,
++				},
++			},
++			expectedEvent: "Normal cert-manager.io Certificate request has been approved by cert-manager.io",
++		},
+ 	}
+ 	for name, test := range tests {
+ 		t.Run(name, func(t *testing.T) {
+diff --git a/pkg/controller/certificaterequests/approver/sync.go b/pkg/controller/certificaterequests/approver/sync.go
+index 7684a5dff..3a89478e0 100644
+--- a/pkg/controller/certificaterequests/approver/sync.go
++++ b/pkg/controller/certificaterequests/approver/sync.go
+@@ -40,6 +40,7 @@ const (
+ // already exists, exit early.
+ func (c *Controller) Sync(ctx context.Context, cr *cmapi.CertificateRequest) (err error) {
+ 	log := logf.FromContext(ctx, "approver")
++	readyCondition := apiutil.GetCertificateRequestCondition(cr, cmapi.CertificateRequestConditionReady)
+ 
+ 	switch {
+ 	case
+@@ -50,8 +51,8 @@ func (c *Controller) Sync(ctx context.Context, cr *cmapi.CertificateRequest) (er
+ 		apiutil.CertificateRequestIsDenied(cr),
+ 
+ 		// If the CertificateRequest is "Issued" or "Failed", exit early.
+-		apiutil.CertificateRequestReadyReason(cr) == cmapi.CertificateRequestReasonFailed,
+-		apiutil.CertificateRequestReadyReason(cr) == cmapi.CertificateRequestReasonIssued:
++		readyCondition != nil && readyCondition.Status == cmmeta.ConditionFalse && readyCondition.Reason == cmapi.CertificateRequestReasonFailed,
++		readyCondition != nil && readyCondition.Status == cmmeta.ConditionTrue && readyCondition.Reason == cmapi.CertificateRequestReasonIssued:
+ 		return nil
+ 	}
+ 
+diff --git a/pkg/controller/certificaterequests/sync.go b/pkg/controller/certificaterequests/sync.go
+index c74c85a47..1c4c5481a 100644
+--- a/pkg/controller/certificaterequests/sync.go
++++ b/pkg/controller/certificaterequests/sync.go
+@@ -76,12 +76,13 @@ func (c *Controller) Sync(ctx context.Context, cr *cmapi.CertificateRequest) (er
+ 		return nil
+ 	}
+ 
+-	switch apiutil.CertificateRequestReadyReason(cr) {
+-	case cmapi.CertificateRequestReasonFailed:
++	readyCondition := apiutil.GetCertificateRequestCondition(cr, cmapi.CertificateRequestConditionReady)
++	switch {
++	case readyCondition != nil && readyCondition.Status == cmmeta.ConditionFalse && readyCondition.Reason == cmapi.CertificateRequestReasonFailed:
+ 		dbg.Info("certificate request Ready condition failed so skipping processing")
+ 		return nil
+ 
+-	case cmapi.CertificateRequestReasonIssued:
++	case readyCondition != nil && readyCondition.Status == cmmeta.ConditionTrue && readyCondition.Reason == cmapi.CertificateRequestReasonIssued:
+ 		dbg.Info("certificate request Ready condition true so skipping processing")
+ 		return nil
+ 	}
+diff --git a/pkg/controller/certificaterequests/util/reporter_test.go b/pkg/controller/certificaterequests/util/reporter_test.go
+index 0c663c30d..7aba462dd 100644
+--- a/pkg/controller/certificaterequests/util/reporter_test.go
++++ b/pkg/controller/certificaterequests/util/reporter_test.go
+@@ -108,6 +108,17 @@ func TestReporter(t *testing.T) {
+ 		LastTransitionTime: &nowMetaTime,
+ 	}
+ 
++	duplicateReadyConditions := []cmapi.CertificateRequestCondition{
++		existingPendingCondition,
++		{
++			Type:               cmapi.CertificateRequestConditionReady,
++			Reason:             "Issued",
++			Message:            "stale issued condition",
++			Status:             "True",
++			LastTransitionTime: &oldMetaTime,
++		},
++	}
++
+ 	tests := map[string]reporterT{
+ 		"a failed report should update the conditions and set FailureTime as it is nil": {
+ 			certificateRequest: gen.CertificateRequestFrom(baseCR),
+@@ -200,6 +211,19 @@ func TestReporter(t *testing.T) {
+ 
+ 			call: "pending",
+ 		},
++		"a pending report should deduplicate Ready conditions and not send an event when the current Ready condition is Pending": {
++			certificateRequest: gen.CertificateRequestFrom(baseCR,
++				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[0]),
++				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[1]),
++			),
++			err:                exampleErr,
++			message:            exampleMessage,
++			reason:             exampleReason,
++			expectedEvents:      []string{},
++			expectedConditions:  []cmapi.CertificateRequestCondition{pendingCondition},
++			expectedFailureTime: nil,
++			call:               "pending",
++		},
+ 		"a ready report should update the conditions and send an event": {
+ 			certificateRequest: gen.CertificateRequestFrom(baseCR,
+ 				gen.SetCertificateRequestStatusCondition(readyCondition),
+@@ -212,6 +236,19 @@ func TestReporter(t *testing.T) {
+ 
+ 			call: "ready",
+ 		},
++		"a ready report should deduplicate Ready conditions and keep a single Ready=True condition": {
++			certificateRequest: gen.CertificateRequestFrom(baseCR,
++				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[0]),
++				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[1]),
++			),
++			expectedEvents: []string{
++				"Normal CertificateIssued Certificate fetched from issuer successfully",
++			},
++			expectedConditions:  []cmapi.CertificateRequestCondition{readyCondition},
++			expectedFailureTime: nil,
++
++			call: "ready",
++		},
+ 
+ 		"a denied report should update the Ready condition to 'Denied'": {
+ 			certificateRequest:  gen.CertificateRequestFrom(baseCR),
+@@ -221,6 +258,17 @@ func TestReporter(t *testing.T) {
+ 
+ 			call: "denied",
+ 		},
++		"a denied report should deduplicate Ready conditions and keep a single Ready=False condition": {
++			certificateRequest: gen.CertificateRequestFrom(baseCR,
++				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[0]),
++				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[1]),
++			),
++			expectedEvents:      []string{},
++			expectedConditions:  []cmapi.CertificateRequestCondition{deniedReadyCondition},
++			expectedFailureTime: &nowMetaTime,
++
++			call: "denied",
++		},
+ 
+ 		"a denied report should update the Ready condition to 'Denied', but not update failure time existing": {
+ 			certificateRequest: gen.CertificateRequestFrom(baseCR,

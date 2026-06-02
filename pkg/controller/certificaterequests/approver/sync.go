@@ -40,6 +40,7 @@ const (
 // already exists, exit early.
 func (c *Controller) Sync(ctx context.Context, cr *cmapi.CertificateRequest) (err error) {
 	log := logf.FromContext(ctx, "approver")
+	readyCondition := apiutil.GetCertificateRequestCondition(cr, cmapi.CertificateRequestConditionReady)
 
 	switch {
 	case
@@ -50,8 +51,8 @@ func (c *Controller) Sync(ctx context.Context, cr *cmapi.CertificateRequest) (er
 		apiutil.CertificateRequestIsDenied(cr),
 
 		// If the CertificateRequest is "Issued" or "Failed", exit early.
-		apiutil.CertificateRequestReadyReason(cr) == cmapi.CertificateRequestReasonFailed,
-		apiutil.CertificateRequestReadyReason(cr) == cmapi.CertificateRequestReasonIssued:
+		readyCondition != nil && readyCondition.Status == cmmeta.ConditionFalse && readyCondition.Reason == cmapi.CertificateRequestReasonFailed,
+		readyCondition != nil && readyCondition.Status == cmmeta.ConditionTrue && readyCondition.Reason == cmapi.CertificateRequestReasonIssued:
 		return nil
 	}
 

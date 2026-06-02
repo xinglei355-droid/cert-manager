@@ -108,6 +108,17 @@ func TestReporter(t *testing.T) {
 		LastTransitionTime: &nowMetaTime,
 	}
 
+	duplicateReadyConditions := []cmapi.CertificateRequestCondition{
+		existingPendingCondition,
+		{
+			Type:               cmapi.CertificateRequestConditionReady,
+			Reason:             "Issued",
+			Message:            "stale issued condition",
+			Status:             "True",
+			LastTransitionTime: &oldMetaTime,
+		},
+	}
+
 	tests := map[string]reporterT{
 		"a failed report should update the conditions and set FailureTime as it is nil": {
 			certificateRequest: gen.CertificateRequestFrom(baseCR),
@@ -200,6 +211,19 @@ func TestReporter(t *testing.T) {
 
 			call: "pending",
 		},
+		"a pending report should deduplicate Ready conditions and not send an event when the current Ready condition is Pending": {
+			certificateRequest: gen.CertificateRequestFrom(baseCR,
+				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[0]),
+				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[1]),
+			),
+			err:                exampleErr,
+			message:            exampleMessage,
+			reason:             exampleReason,
+			expectedEvents:      []string{},
+			expectedConditions:  []cmapi.CertificateRequestCondition{pendingCondition},
+			expectedFailureTime: nil,
+			call:               "pending",
+		},
 		"a ready report should update the conditions and send an event": {
 			certificateRequest: gen.CertificateRequestFrom(baseCR,
 				gen.SetCertificateRequestStatusCondition(readyCondition),
@@ -212,9 +236,33 @@ func TestReporter(t *testing.T) {
 
 			call: "ready",
 		},
+		"a ready report should deduplicate Ready conditions and keep a single Ready=True condition": {
+			certificateRequest: gen.CertificateRequestFrom(baseCR,
+				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[0]),
+				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[1]),
+			),
+			expectedEvents: []string{
+				"Normal CertificateIssued Certificate fetched from issuer successfully",
+			},
+			expectedConditions:  []cmapi.CertificateRequestCondition{readyCondition},
+			expectedFailureTime: nil,
+
+			call: "ready",
+		},
 
 		"a denied report should update the Ready condition to 'Denied'": {
 			certificateRequest:  gen.CertificateRequestFrom(baseCR),
+			expectedEvents:      []string{},
+			expectedConditions:  []cmapi.CertificateRequestCondition{deniedReadyCondition},
+			expectedFailureTime: &nowMetaTime,
+
+			call: "denied",
+		},
+		"a denied report should deduplicate Ready conditions and keep a single Ready=False condition": {
+			certificateRequest: gen.CertificateRequestFrom(baseCR,
+				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[0]),
+				gen.AddCertificateRequestStatusCondition(duplicateReadyConditions[1]),
+			),
 			expectedEvents:      []string{},
 			expectedConditions:  []cmapi.CertificateRequestCondition{deniedReadyCondition},
 			expectedFailureTime: &nowMetaTime,

@@ -28,12 +28,37 @@ import (
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	testpkg "github.com/cert-manager/cert-manager/pkg/controller/test"
+	"github.com/cert-manager/cert-manager/test/unit/gen"
 )
 
 func TestProcessItem(t *testing.T) {
 	// now time is the current time at the start of the test (the clock is fixed)
 	now := time.Now()
 	metaNow := metav1.NewTime(now)
+
+	requestWithDuplicateApprovedConditions := gen.CertificateRequest("test")
+	requestWithDuplicateApprovedConditions.Status.Conditions = []cmapi.CertificateRequestCondition{
+		{
+			Type:   cmapi.CertificateRequestConditionReady,
+			Status: cmmeta.ConditionFalse,
+			Reason: cmapi.CertificateRequestReasonPending,
+		},
+		{
+			Type:               cmapi.CertificateRequestConditionApproved,
+			Status:             cmmeta.ConditionFalse,
+			Reason:             "old-approver",
+			Message:            "stale approval",
+			LastTransitionTime: &metaNow,
+		},
+		{
+			Type:               cmapi.CertificateRequestConditionApproved,
+			Status:             cmmeta.ConditionFalse,
+			Reason:             "duplicate-approver",
+			Message:            "duplicate stale approval",
+			LastTransitionTime: &metaNow,
+		},
+	}
+
 	tests := map[string]struct {
 		// key that should be passed to ProcessItem.
 		// if not set, the 'namespace/name' of the 'CertificateRequest' field will be used.
@@ -154,6 +179,24 @@ func TestProcessItem(t *testing.T) {
 					},
 				},
 			},
+			expectedConditions: []cmapi.CertificateRequestCondition{
+				{
+					Type:   cmapi.CertificateRequestConditionReady,
+					Status: cmmeta.ConditionFalse,
+					Reason: cmapi.CertificateRequestReasonPending,
+				},
+				{
+					Type:               cmapi.CertificateRequestConditionApproved,
+					Status:             cmmeta.ConditionTrue,
+					Reason:             "cert-manager.io",
+					Message:            ApprovedMessage,
+					LastTransitionTime: &metaNow,
+				},
+			},
+			expectedEvent: "Normal cert-manager.io Certificate request has been approved by cert-manager.io",
+		},
+		"approve CertificateRequest replaces duplicate Approved conditions": {
+			request: requestWithDuplicateApprovedConditions,
 			expectedConditions: []cmapi.CertificateRequestCondition{
 				{
 					Type:   cmapi.CertificateRequestConditionReady,
