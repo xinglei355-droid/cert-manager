@@ -254,38 +254,39 @@ func SetCertificateRequestCondition(cr *cmapi.CertificateRequest, conditionType 
 	nowTime := metav1.NewTime(Clock.Now())
 	newCondition.LastTransitionTime = &nowTime
 
-	// Search through existing conditions
-	for idx, cond := range cr.Status.Conditions {
-		// Skip unrelated conditions
-		if cond.Type != conditionType {
+	var updatedConditions []cmapi.CertificateRequestCondition
+	found := false
+	for _, cond := range cr.Status.Conditions {
+		if cond.Type == conditionType {
+			if found {
+				continue // skip duplicates
+			}
+			found = true
+			// If this update doesn't contain a state transition, we don't update
+			// the conditions LastTransitionTime to Now()
+			if cond.Status == status {
+				newCondition.LastTransitionTime = cond.LastTransitionTime
+			} else {
+				logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
+					"certificateRequest", klog.KObj(cr),
+					"condition", conditionType,
+					"oldStatus", cond.Status,
+					"status", status,
+					"lastTransitionTime", nowTime.Time)
+			}
 			continue
 		}
-
-		// If this update doesn't contain a state transition, we don't update
-		// the conditions LastTransitionTime to Now()
-		if cond.Status == status {
-			newCondition.LastTransitionTime = cond.LastTransitionTime
-		} else {
-			logf.Log.V(logf.InfoLevel).Info("Found status change for CertificateRequest condition; setting lastTransitionTime",
-				"certificateRequest", klog.KObj(cr),
-				"condition", conditionType,
-				"oldStatus", cond.Status,
-				"status", status,
-				"lastTransitionTime", nowTime.Time)
-		}
-
-		// Overwrite the existing condition
-		cr.Status.Conditions[idx] = newCondition
-		return
+		updatedConditions = append(updatedConditions, cond)
 	}
 
-	// If we've not found an existing condition of this type, we simply insert
-	// the new condition into the slice.
-	cr.Status.Conditions = append(cr.Status.Conditions, newCondition)
-	logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
-		"certificateRequest", klog.KObj(cr),
-		"condition", conditionType,
-		"lastTransitionTime", nowTime.Time)
+	cr.Status.Conditions = append(updatedConditions, newCondition)
+	
+	if !found {
+		logf.Log.V(logf.InfoLevel).Info("Setting lastTransitionTime for CertificateRequest condition",
+			"certificateRequest", klog.KObj(cr),
+			"condition", conditionType,
+			"lastTransitionTime", nowTime.Time)
+	}
 }
 
 // CertificateRequestHasCondition will return true if the given
