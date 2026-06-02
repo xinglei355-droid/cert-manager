@@ -543,6 +543,112 @@ func Test_NewTriggerPolicyChain(t *testing.T) {
 				},
 			},
 		},
+		"trigger renewal if explicitly set renewBefore is reached": {
+			certificate: &cmapi.Certificate{
+				Spec: cmapi.CertificateSpec{
+					CommonName: "example.com",
+					IssuerRef: cmmeta.IssuerReference{
+						Name:  "testissuer",
+						Kind:  "IssuerKind",
+						Group: "group.example.com",
+					},
+					RenewBefore: &metav1.Duration{Duration: time.Minute * 10},
+				},
+				Status: cmapi.CertificateStatus{
+					RenewalTime: &metav1.Time{Time: clock.Now().Add(-time.Minute)},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "something",
+					Annotations: map[string]string{
+						cmapi.IssuerNameAnnotationKey:  "testissuer",
+						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
+						cmapi.IssuerGroupAnnotationKey: "group.example.com",
+					},
+				},
+				Data: map[string][]byte{
+					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+						clock.Now().Add(-time.Minute*30),
+						clock.Now().Add(time.Minute*9),
+					),
+				},
+			},
+			reason:  Renewing,
+			message: fmt.Sprintf("Renewing certificate as renewal was scheduled at %s", metav1.NewTime(clock.Now().Add(-time.Minute))),
+			reissue: true,
+		},
+		"trigger renewal if unset renewBefore (default window) is reached": {
+			certificate: &cmapi.Certificate{
+				Spec: cmapi.CertificateSpec{
+					CommonName: "example.com",
+					IssuerRef: cmmeta.IssuerReference{
+						Name:  "testissuer",
+						Kind:  "IssuerKind",
+						Group: "group.example.com",
+					},
+				},
+				Status: cmapi.CertificateStatus{
+					RenewalTime: &metav1.Time{Time: clock.Now().Add(-time.Minute)},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "something",
+					Annotations: map[string]string{
+						cmapi.IssuerNameAnnotationKey:  "testissuer",
+						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
+						cmapi.IssuerGroupAnnotationKey: "group.example.com",
+					},
+				},
+				Data: map[string][]byte{
+					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+						clock.Now().Add(-time.Minute*40),
+						clock.Now().Add(time.Minute*10),
+					),
+				},
+			},
+			reason:  Renewing,
+			message: fmt.Sprintf("Renewing certificate as renewal was scheduled at %s", metav1.NewTime(clock.Now().Add(-time.Minute))),
+			reissue: true,
+		},
+		"trigger renewal if certificate has already expired": {
+			certificate: &cmapi.Certificate{
+				Spec: cmapi.CertificateSpec{
+					CommonName: "example.com",
+					IssuerRef: cmmeta.IssuerReference{
+						Name:  "testissuer",
+						Kind:  "IssuerKind",
+						Group: "group.example.com",
+					},
+				},
+				Status: cmapi.CertificateStatus{
+					RenewalTime: &metav1.Time{Time: clock.Now().Add(-time.Minute * 10)},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "something",
+					Annotations: map[string]string{
+						cmapi.IssuerNameAnnotationKey:  "testissuer",
+						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
+						cmapi.IssuerGroupAnnotationKey: "group.example.com",
+					},
+				},
+				Data: map[string][]byte{
+					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
+					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
+						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
+						clock.Now().Add(-time.Minute*40),
+						clock.Now().Add(-time.Minute*5),
+					),
+				},
+			},
+			reason:  Renewing,
+			message: fmt.Sprintf("Renewing certificate as renewal was scheduled at %s", metav1.NewTime(clock.Now().Add(-time.Minute*10))),
+			reissue: true,
+		},
 	}
 	policyChain := NewTriggerPolicyChain(clock)
 	for name, test := range tests {

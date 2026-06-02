@@ -280,8 +280,29 @@ func CurrentCertificateNearingExpiry(c clock.Clock) Func {
 			message = err.Error()
 		}
 
+		if renewalTime == nil {
+			if crt.Spec.Renewal != nil && crt.Spec.Renewal.Policy == cmapi.CertificateRenewalPolicyDisabled {
+				return "", "", false
+			}
+
+			// If renewalTime is nil due to an error, we still want to evaluate whether
+			// the certificate is nearing expiry using the default fallback time to
+			// prevent it from expiring silently.
+			actualDuration := notAfter.Time.Sub(notBefore.Time)
+			var actualRenewBefore time.Duration
+			if crt.Spec.RenewBefore != nil && crt.Spec.RenewBefore.Duration > 0 && crt.Spec.RenewBefore.Duration < actualDuration {
+				actualRenewBefore = crt.Spec.RenewBefore.Duration
+			} else if crt.Spec.RenewBeforePercentage != nil && *crt.Spec.RenewBeforePercentage > 0 && *crt.Spec.RenewBeforePercentage < 100 {
+				actualRenewBefore = actualDuration * time.Duration(*crt.Spec.RenewBeforePercentage) / 100
+			} else {
+				actualRenewBefore = actualDuration / 3
+			}
+			rt := metav1.NewTime(notAfter.Time.Add(-1 * actualRenewBefore).Truncate(time.Second))
+			renewalTime = &rt
+		}
+
 		renewIn := renewalTime.Time.Sub(c.Now())
-		if renewIn > 0 {
+		if renewIn > 0 && !c.Now().After(notAfter.Time) {
 			// renewal time is in the future, no need to renew
 			return "", "", false
 		}

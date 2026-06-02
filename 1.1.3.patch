@@ -1,0 +1,152 @@
+diff --git a/internal/controller/certificates/policies/checks.go b/internal/controller/certificates/policies/checks.go
+index 9263f5f12..73ae7ebed 100644
+--- a/internal/controller/certificates/policies/checks.go
++++ b/internal/controller/certificates/policies/checks.go
+@@ -280,8 +280,29 @@ func CurrentCertificateNearingExpiry(c clock.Clock) Func {
+ 			message = err.Error()
+ 		}
+ 
++		if renewalTime == nil {
++			if crt.Spec.Renewal != nil && crt.Spec.Renewal.Policy == cmapi.CertificateRenewalPolicyDisabled {
++				return "", "", false
++			}
++
++			// If renewalTime is nil due to an error, we still want to evaluate whether
++			// the certificate is nearing expiry using the default fallback time to
++			// prevent it from expiring silently.
++			actualDuration := notAfter.Time.Sub(notBefore.Time)
++			var actualRenewBefore time.Duration
++			if crt.Spec.RenewBefore != nil && crt.Spec.RenewBefore.Duration > 0 && crt.Spec.RenewBefore.Duration < actualDuration {
++				actualRenewBefore = crt.Spec.RenewBefore.Duration
++			} else if crt.Spec.RenewBeforePercentage != nil && *crt.Spec.RenewBeforePercentage > 0 && *crt.Spec.RenewBeforePercentage < 100 {
++				actualRenewBefore = actualDuration * time.Duration(*crt.Spec.RenewBeforePercentage) / 100
++			} else {
++				actualRenewBefore = actualDuration / 3
++			}
++			rt := metav1.NewTime(notAfter.Time.Add(-1 * actualRenewBefore).Truncate(time.Second))
++			renewalTime = &rt
++		}
++
+ 		renewIn := renewalTime.Time.Sub(c.Now())
+-		if renewIn > 0 {
++		if renewIn > 0 && !c.Now().After(notAfter.Time) {
+ 			// renewal time is in the future, no need to renew
+ 			return "", "", false
+ 		}
+diff --git a/internal/controller/certificates/policies/checks_test.go b/internal/controller/certificates/policies/checks_test.go
+index 4652a3f59..84f8f219b 100644
+--- a/internal/controller/certificates/policies/checks_test.go
++++ b/internal/controller/certificates/policies/checks_test.go
+@@ -543,6 +543,112 @@ func Test_NewTriggerPolicyChain(t *testing.T) {
+ 				},
+ 			},
+ 		},
++		"trigger renewal if explicitly set renewBefore is reached": {
++			certificate: &cmapi.Certificate{
++				Spec: cmapi.CertificateSpec{
++					CommonName: "example.com",
++					IssuerRef: cmmeta.IssuerReference{
++						Name:  "testissuer",
++						Kind:  "IssuerKind",
++						Group: "group.example.com",
++					},
++					RenewBefore: &metav1.Duration{Duration: time.Minute * 10},
++				},
++				Status: cmapi.CertificateStatus{
++					RenewalTime: &metav1.Time{Time: clock.Now().Add(-time.Minute)},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: "something",
++					Annotations: map[string]string{
++						cmapi.IssuerNameAnnotationKey:  "testissuer",
++						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
++						cmapi.IssuerGroupAnnotationKey: "group.example.com",
++					},
++				},
++				Data: map[string][]byte{
++					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
++					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
++						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
++						clock.Now().Add(-time.Minute*30),
++						clock.Now().Add(time.Minute*9),
++					),
++				},
++			},
++			reason:  Renewing,
++			message: fmt.Sprintf("Renewing certificate as renewal was scheduled at %s", metav1.NewTime(clock.Now().Add(-time.Minute))),
++			reissue: true,
++		},
++		"trigger renewal if unset renewBefore (default window) is reached": {
++			certificate: &cmapi.Certificate{
++				Spec: cmapi.CertificateSpec{
++					CommonName: "example.com",
++					IssuerRef: cmmeta.IssuerReference{
++						Name:  "testissuer",
++						Kind:  "IssuerKind",
++						Group: "group.example.com",
++					},
++				},
++				Status: cmapi.CertificateStatus{
++					RenewalTime: &metav1.Time{Time: clock.Now().Add(-time.Minute)},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: "something",
++					Annotations: map[string]string{
++						cmapi.IssuerNameAnnotationKey:  "testissuer",
++						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
++						cmapi.IssuerGroupAnnotationKey: "group.example.com",
++					},
++				},
++				Data: map[string][]byte{
++					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
++					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
++						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
++						clock.Now().Add(-time.Minute*40),
++						clock.Now().Add(time.Minute*10),
++					),
++				},
++			},
++			reason:  Renewing,
++			message: fmt.Sprintf("Renewing certificate as renewal was scheduled at %s", metav1.NewTime(clock.Now().Add(-time.Minute))),
++			reissue: true,
++		},
++		"trigger renewal if certificate has already expired": {
++			certificate: &cmapi.Certificate{
++				Spec: cmapi.CertificateSpec{
++					CommonName: "example.com",
++					IssuerRef: cmmeta.IssuerReference{
++						Name:  "testissuer",
++						Kind:  "IssuerKind",
++						Group: "group.example.com",
++					},
++				},
++				Status: cmapi.CertificateStatus{
++					RenewalTime: &metav1.Time{Time: clock.Now().Add(-time.Minute * 10)},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: "something",
++					Annotations: map[string]string{
++						cmapi.IssuerNameAnnotationKey:  "testissuer",
++						cmapi.IssuerKindAnnotationKey:  "IssuerKind",
++						cmapi.IssuerGroupAnnotationKey: "group.example.com",
++					},
++				},
++				Data: map[string][]byte{
++					corev1.TLSPrivateKeyKey: staticFixedPrivateKey,
++					corev1.TLSCertKey: testcrypto.MustCreateCertWithNotBeforeAfter(t, staticFixedPrivateKey,
++						&cmapi.Certificate{Spec: cmapi.CertificateSpec{CommonName: "example.com"}},
++						clock.Now().Add(-time.Minute*40),
++						clock.Now().Add(-time.Minute*5),
++					),
++				},
++			},
++			reason:  Renewing,
++			message: fmt.Sprintf("Renewing certificate as renewal was scheduled at %s", metav1.NewTime(clock.Now().Add(-time.Minute*10))),
++			reissue: true,
++		},
+ 	}
+ 	policyChain := NewTriggerPolicyChain(clock)
+ 	for name, test := range tests {
