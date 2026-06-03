@@ -1,0 +1,45 @@
+diff --git a/README.md b/README.md
+index 20ad5c0a5..3a0c1f6fe 100644
+--- a/README.md
++++ b/README.md
+@@ -52,6 +52,14 @@ website page.
+ Note in particular that macOS has several extra requirements, to ensure that modern tools are installed and available. Read the page before
+ getting started!
+ 
++For a minimal single-package unit test from the repository root, use:
++
++```console
++make unit-test-core-module UNIT_TEST_PACKAGE=./pkg/controller/acmechallenges
++```
++
++This skips the integration-test dependencies that `make test` prepares and is the most reliable entry point in local Docker or Trae containers for root-module packages. For packages that live in split modules under `cmd/`, keep using the existing module-specific targets such as `make unit-test-controller`.
++
+ ## Troubleshooting
+ 
+ If you encounter any issues whilst using cert-manager, we have a number of ways to get help:
+diff --git a/make/test.mk b/make/test.mk
+index f9fb74615..4e9404ce7 100644
+--- a/make/test.mk
++++ b/make/test.mk
+@@ -19,8 +19,11 @@ GOTESTSUM_CI_FLAGS := --junitfile-testsuite-name short --junitfile-testcase-clas
+ 
+ # WHAT can be used to control which unit tests are run by "make test"; defaults to running all
+ # tests except e2e tests (which require more significant setup)
+-# For example: make WHAT=./pkg/util/pki test-pretty to only run the PKI utils tests
++# For a single root-module unit test package, prefer:
++# make unit-test-core-module UNIT_TEST_PACKAGE=./pkg/controller/acmechallenges
+ WHAT ?= ./pkg/... ./internal/... ./test/... ./hack/prune-junit-xml/...
++UNIT_TEST_PACKAGE ?= ./pkg/... ./internal/...
++UNIT_TEST_GO_TEST_FLAGS ?=
+ 
+ .PHONY: test
+ ## Test is the workhorse test command which by default runs all unit and
+@@ -71,7 +74,7 @@ unit-test: unit-test-core-module unit-test-acmesolver unit-test-cainjector unit-
+ 
+ .PHONY: unit-test-core-module
+ unit-test-core-module: | $(NEEDS_GOTESTSUM)
+-	$(GOTESTSUM) ./pkg/... ./internal/...
++	$(GOTESTSUM) -- $(UNIT_TEST_GO_TEST_FLAGS) $(UNIT_TEST_PACKAGE)
+ 
+ .PHONY: unit-test-acmesolver
+ unit-test-acmesolver: | $(NEEDS_GOTESTSUM)

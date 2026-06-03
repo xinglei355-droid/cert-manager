@@ -52,6 +52,14 @@ website page.
 Note in particular that macOS has several extra requirements, to ensure that modern tools are installed and available. Read the page before
 getting started!
 
+For a minimal single-package unit test from the repository root, use:
+
+```console
+make unit-test-core-module UNIT_TEST_PACKAGE=./pkg/controller/acmechallenges
+```
+
+This skips the integration-test dependencies that `make test` prepares and is the most reliable entry point in local Docker or Trae containers for root-module packages. For packages that live in split modules under `cmd/`, keep using the existing module-specific targets such as `make unit-test-controller`.
+
 ## Troubleshooting
 
 If you encounter any issues whilst using cert-manager, we have a number of ways to get help:

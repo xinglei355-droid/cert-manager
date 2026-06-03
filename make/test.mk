@@ -19,8 +19,11 @@ GOTESTSUM_CI_FLAGS := --junitfile-testsuite-name short --junitfile-testcase-clas
 
 # WHAT can be used to control which unit tests are run by "make test"; defaults to running all
 # tests except e2e tests (which require more significant setup)
-# For example: make WHAT=./pkg/util/pki test-pretty to only run the PKI utils tests
+# For a single root-module unit test package, prefer:
+# make unit-test-core-module UNIT_TEST_PACKAGE=./pkg/controller/acmechallenges
 WHAT ?= ./pkg/... ./internal/... ./test/... ./hack/prune-junit-xml/...
+UNIT_TEST_PACKAGE ?= ./pkg/... ./internal/...
+UNIT_TEST_GO_TEST_FLAGS ?=
 
 .PHONY: test
 ## Test is the workhorse test command which by default runs all unit and
@@ -71,7 +74,7 @@ unit-test: unit-test-core-module unit-test-acmesolver unit-test-cainjector unit-
 
 .PHONY: unit-test-core-module
 unit-test-core-module: | $(NEEDS_GOTESTSUM)
-	$(GOTESTSUM) ./pkg/... ./internal/...
+	$(GOTESTSUM) -- $(UNIT_TEST_GO_TEST_FLAGS) $(UNIT_TEST_PACKAGE)
 
 .PHONY: unit-test-acmesolver
 unit-test-acmesolver: | $(NEEDS_GOTESTSUM)
