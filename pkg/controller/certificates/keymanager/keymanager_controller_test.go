@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -71,6 +72,235 @@ func relaxedSecretMatcher(l coretesting.Action, r coretesting.Action) error {
 		return fmt.Errorf("unexpected difference between actions (-want +got):\n%s", cmp.Diff(objL, objR))
 	}
 	return nil
+}
+
+type privateKeyRotationFixtureBuilder struct {
+	t           *testing.T
+	certificate *cmapi.Certificate
+	kubeObjects []runtime.Object
+}
+
+func newPrivateKeyRotationFixtureBuilder(t *testing.T) *privateKeyRotationFixtureBuilder {
+	return &privateKeyRotationFixtureBuilder{
+		t: t,
+		certificate: &cmapi.Certificate{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test", UID: types.UID("test")},
+			Spec: cmapi.CertificateSpec{
+				SecretName: "output",
+				PrivateKey: &cmapi.CertificatePrivateKey{
+					RotationPolicy: cmapi.RotationPolicyNever,
+					Algorithm:      cmapi.RSAKeyAlgorithm,
+					Size:           2048,
+				},
+			},
+			Status: cmapi.CertificateStatus{
+				Conditions: []cmapi.CertificateCondition{{
+					Type:   cmapi.CertificateConditionIssuing,
+					Status: cmmeta.ConditionTrue,
+				}},
+			},
+		},
+	}
+}
+
+func (b *privateKeyRotationFixtureBuilder) WithRotationPolicy(policy cmapi.PrivateKeyRotationPolicy) *privateKeyRotationFixtureBuilder {
+	b.certificate.Spec.PrivateKey.RotationPolicy = policy
+	return b
+}
+
+func (b *privateKeyRotationFixtureBuilder) WithTargetSecretData(data map[string][]byte) *privateKeyRotationFixtureBuilder {
+	b.kubeObjects = append(b.kubeObjects, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: b.certificate.Namespace,
+			Name:      b.certificate.Spec.SecretName,
+		},
+		Data: data,
+	})
+	return b
+}
+
+func (b *privateKeyRotationFixtureBuilder) Build() *privateKeyRotationFixture {
+	crt := b.certificate.DeepCopy()
+
+	return &privateKeyRotationFixture{
+		t:               b.t,
+		certificate:     crt,
+		temporarySecret: fmt.Sprintf("%s-notrandom", crt.Name),
+		builder: &testpkg.Builder{
+			T:                   b.t,
+			CertManagerObjects:  []runtime.Object{crt.DeepCopy()},
+			KubeObjects:         append([]runtime.Object(nil), b.kubeObjects...),
+			StringGenerator:     func(int) string { return "notrandom" },
+			ExpectedActions:     nil,
+			ExpectedEvents:      nil,
+			PartialMetadataObjects: nil,
+		},
+	}
+}
+
+type privateKeyRotationFixture struct {
+	t               *testing.T
+	builder         *testpkg.Builder
+	certificate     *cmapi.Certificate
+	temporarySecret string
+}
+
+func (f *privateKeyRotationFixture) Reconcile() error {
+	f.builder.Init()
+
+	w := &controllerWrapper{}
+	if _, _, err := w.Register(f.builder.Context); err != nil {
+		return err
+	}
+
+	f.builder.Start()
+	if err := w.controller.ProcessItem(f.t.Context(), types.NamespacedName{
+		Namespace: f.certificate.Namespace,
+		Name:      f.certificate.Name,
+	}); err != nil {
+		return err
+	}
+
+	f.builder.Sync()
+	return nil
+}
+
+func (f *privateKeyRotationFixture) Stop() {
+	f.builder.Stop()
+}
+
+func (f *privateKeyRotationFixture) Certificate() *cmapi.Certificate {
+	crt, err := f.builder.FakeCMClient().CertmanagerV1().Certificates(f.certificate.Namespace).Get(f.t.Context(), f.certificate.Name, metav1.GetOptions{})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return crt
+}
+
+func (f *privateKeyRotationFixture) Secret(name string) (*corev1.Secret, error) {
+	return f.builder.FakeKubeClient().CoreV1().Secrets(f.certificate.Namespace).Get(f.t.Context(), name, metav1.GetOptions{})
+}
+
+func assertPrivateKeyMatchesSpec(t *testing.T, pkData []byte, spec cmapi.CertificateSpec) {
+	t.Helper()
+
+	if len(pkData) == 0 {
+		t.Fatal("expected tls.key data to be present")
+	}
+
+	pk, err := pki.DecodePrivateKeyBytes(pkData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	violations := pki.PrivateKeyMatchesSpec(pk, spec)
+	if len(violations) > 0 {
+		t.Fatalf("expected private key to match certificate spec, got violations: %v", violations)
+	}
+}
+
+func TestProcessItem_PrivateKeyRotationFixtures(t *testing.T) {
+	validRSA := mustGenerateRSA(t, 2048)
+	mismatchedECDSA := mustGenerateECDSA(t, pki.ECCurve256)
+
+	tests := map[string]struct {
+		fixture                    *privateKeyRotationFixture
+		wantNextPrivateKeySecret   *string
+		assertResult               func(t *testing.T, fixture *privateKeyRotationFixture)
+	}{
+		"if target Secret is missing and rotation policy is Never, generate a new temporary private key": {
+			fixture:                  newPrivateKeyRotationFixtureBuilder(t).WithRotationPolicy(cmapi.RotationPolicyNever).Build(),
+			wantNextPrivateKeySecret: new("test-notrandom"),
+			assertResult: func(t *testing.T, fixture *privateKeyRotationFixture) {
+				temporarySecret, err := fixture.Secret(fixture.temporarySecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				assertPrivateKeyMatchesSpec(t, temporarySecret.Data[corev1.TLSPrivateKeyKey], fixture.certificate.Spec)
+			},
+		},
+		"if target Secret private key algorithm mismatches and rotation policy is Never, do not create a temporary private key": {
+			fixture: newPrivateKeyRotationFixtureBuilder(t).
+				WithRotationPolicy(cmapi.RotationPolicyNever).
+				WithTargetSecretData(map[string][]byte{corev1.TLSPrivateKeyKey: mismatchedECDSA}).
+				Build(),
+			wantNextPrivateKeySecret: nil,
+			assertResult: func(t *testing.T, fixture *privateKeyRotationFixture) {
+				_, err := fixture.Secret(fixture.temporarySecret)
+				if !apierrors.IsNotFound(err) {
+					t.Fatalf("expected temporary Secret to not exist, got: %v", err)
+				}
+
+				targetSecret, err := fixture.Secret(fixture.certificate.Spec.SecretName)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if diff := cmp.Diff(mismatchedECDSA, targetSecret.Data[corev1.TLSPrivateKeyKey]); diff != "" {
+					t.Fatalf("unexpected target Secret private key data (-want +got):\n%s", diff)
+				}
+			},
+		},
+		"if target Secret contains a matching private key and rotation policy is Never, reuse it in the temporary Secret": {
+			fixture: newPrivateKeyRotationFixtureBuilder(t).
+				WithRotationPolicy(cmapi.RotationPolicyNever).
+				WithTargetSecretData(map[string][]byte{corev1.TLSPrivateKeyKey: validRSA}).
+				Build(),
+			wantNextPrivateKeySecret: new("test-notrandom"),
+			assertResult: func(t *testing.T, fixture *privateKeyRotationFixture) {
+				temporarySecret, err := fixture.Secret(fixture.temporarySecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if diff := cmp.Diff(validRSA, temporarySecret.Data[corev1.TLSPrivateKeyKey]); diff != "" {
+					t.Fatalf("unexpected temporary Secret private key data (-want +got):\n%s", diff)
+				}
+			},
+		},
+		"if target Secret private key algorithm mismatches and rotation policy is Always, generate a new temporary private key": {
+			fixture: newPrivateKeyRotationFixtureBuilder(t).
+				WithRotationPolicy(cmapi.RotationPolicyAlways).
+				WithTargetSecretData(map[string][]byte{corev1.TLSPrivateKeyKey: mismatchedECDSA}).
+				Build(),
+			wantNextPrivateKeySecret: new("test-notrandom"),
+			assertResult: func(t *testing.T, fixture *privateKeyRotationFixture) {
+				temporarySecret, err := fixture.Secret(fixture.temporarySecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if diff := cmp.Diff(mismatchedECDSA, temporarySecret.Data[corev1.TLSPrivateKeyKey]); diff == "" {
+					t.Fatal("expected a regenerated private key in temporary Secret")
+				}
+
+				assertPrivateKeyMatchesSpec(t, temporarySecret.Data[corev1.TLSPrivateKeyKey], fixture.certificate.Spec)
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := test.fixture.Reconcile()
+			defer test.fixture.Stop()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			gotCertificate := test.fixture.Certificate()
+
+			if diff := cmp.Diff(test.wantNextPrivateKeySecret, gotCertificate.Status.NextPrivateKeySecretName); diff != "" {
+				t.Fatalf("unexpected nextPrivateKeySecretName (-want +got):\n%s", diff)
+			}
+
+			if diff := cmp.Diff(test.fixture.certificate.Status.Conditions, gotCertificate.Status.Conditions); diff != "" {
+				t.Fatalf("unexpected certificate conditions (-want +got):\n%s", diff)
+			}
+
+			test.assertResult(t, test.fixture)
+		})
+	}
 }
 
 func TestProcessItem(t *testing.T) {
