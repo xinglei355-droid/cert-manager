@@ -515,6 +515,233 @@ func TestProcessItem(t *testing.T) {
 				ownedSecretWithName("testns", "fixed-name", "test", map[string][]byte{"tls.key": mustGenerateRSA(t, 2048)}),
 			},
 		},
+		"Secret missing, rotationPolicy=Never: should generate new key and set nextPrivateKeySecretName": {
+			certificate: &cmapi.Certificate{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test", UID: types.UID("test")},
+				Spec: cmapi.CertificateSpec{
+					SecretName: "target-secret",
+					PrivateKey: &cmapi.CertificatePrivateKey{
+						RotationPolicy: cmapi.RotationPolicyNever,
+					},
+				},
+				Status: cmapi.CertificateStatus{
+					Conditions: []cmapi.CertificateCondition{
+						{
+							Type:   cmapi.CertificateConditionIssuing,
+							Status: cmmeta.ConditionTrue,
+						},
+					},
+				},
+			},
+			secrets: []runtime.Object{},
+			expectedEvents: []string{`Normal Generated Stored new private key in temporary Secret resource "test-notrandom"`},
+			expectedActions: []testpkg.Action{
+				testpkg.NewAction(coretesting.NewGetAction(
+					cmapi.SchemeGroupVersion.WithResource("certificates"),
+					"testns",
+					"test",
+				)),
+				testpkg.NewAction(coretesting.NewUpdateSubresourceAction(
+					cmapi.SchemeGroupVersion.WithResource("certificates"),
+					"status",
+					"testns",
+					&cmapi.Certificate{
+						ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test", UID: types.UID("test")},
+						Spec: cmapi.CertificateSpec{
+							SecretName: "target-secret",
+							PrivateKey: &cmapi.CertificatePrivateKey{
+								RotationPolicy: cmapi.RotationPolicyNever,
+							},
+						},
+						Status: cmapi.CertificateStatus{
+							NextPrivateKeySecretName: new("test-notrandom"),
+							Conditions: []cmapi.CertificateCondition{
+								{
+									Type:   cmapi.CertificateConditionIssuing,
+									Status: cmmeta.ConditionTrue,
+								},
+							},
+						},
+					},
+				)),
+				testpkg.NewCustomMatch(coretesting.NewCreateAction(
+					corev1.SchemeGroupVersion.WithResource("secrets"),
+					"testns",
+					&corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace:       "testns",
+							GenerateName:    "test-",
+							Labels:          map[string]string{cmapi.IsNextPrivateKeySecretLabelKey: "true", cmapi.PartOfCertManagerControllerLabelKey: "true"},
+							OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&cmapi.Certificate{ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test"}}, certificateGvk)},
+						},
+						Data: map[string][]byte{"tls.key": nil},
+					},
+				), relaxedSecretMatcher),
+			},
+		},
+		"Secret missing, rotationPolicy=Always: should generate new key and set nextPrivateKeySecretName": {
+			certificate: &cmapi.Certificate{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test", UID: types.UID("test")},
+				Spec: cmapi.CertificateSpec{
+					SecretName: "target-secret",
+					PrivateKey: &cmapi.CertificatePrivateKey{
+						RotationPolicy: cmapi.RotationPolicyAlways,
+					},
+				},
+				Status: cmapi.CertificateStatus{
+					Conditions: []cmapi.CertificateCondition{
+						{
+							Type:   cmapi.CertificateConditionIssuing,
+							Status: cmmeta.ConditionTrue,
+						},
+					},
+				},
+			},
+			secrets: []runtime.Object{},
+			expectedEvents: []string{`Normal Generated Stored new private key in temporary Secret resource "test-notrandom"`},
+			expectedActions: []testpkg.Action{
+				testpkg.NewAction(coretesting.NewGetAction(
+					cmapi.SchemeGroupVersion.WithResource("certificates"),
+					"testns",
+					"test",
+				)),
+				testpkg.NewAction(coretesting.NewUpdateSubresourceAction(
+					cmapi.SchemeGroupVersion.WithResource("certificates"),
+					"status",
+					"testns",
+					&cmapi.Certificate{
+						ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test", UID: types.UID("test")},
+						Spec: cmapi.CertificateSpec{
+							SecretName: "target-secret",
+							PrivateKey: &cmapi.CertificatePrivateKey{
+								RotationPolicy: cmapi.RotationPolicyAlways,
+							},
+						},
+						Status: cmapi.CertificateStatus{
+							NextPrivateKeySecretName: new("test-notrandom"),
+							Conditions: []cmapi.CertificateCondition{
+								{
+									Type:   cmapi.CertificateConditionIssuing,
+									Status: cmmeta.ConditionTrue,
+								},
+							},
+						},
+					},
+				)),
+				testpkg.NewCustomMatch(coretesting.NewCreateAction(
+					corev1.SchemeGroupVersion.WithResource("secrets"),
+					"testns",
+					&corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace:       "testns",
+							GenerateName:    "test-",
+							Labels:          map[string]string{cmapi.IsNextPrivateKeySecretLabelKey: "true", cmapi.PartOfCertManagerControllerLabelKey: "true"},
+							OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&cmapi.Certificate{ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test"}}, certificateGvk)},
+						},
+						Data: map[string][]byte{"tls.key": nil},
+					},
+				), relaxedSecretMatcher),
+			},
+		},
+		"Secret algorithm mismatch, rotationPolicy=Never: should emit warning and do nothing": {
+			certificate: &cmapi.Certificate{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test", UID: types.UID("test")},
+				Spec: cmapi.CertificateSpec{
+					SecretName: "target-secret",
+					PrivateKey: &cmapi.CertificatePrivateKey{
+						RotationPolicy: cmapi.RotationPolicyNever,
+						Algorithm:      cmapi.ECDSAKeyAlgorithm,
+					},
+				},
+				Status: cmapi.CertificateStatus{
+					Conditions: []cmapi.CertificateCondition{
+						{
+							Type:   cmapi.CertificateConditionIssuing,
+							Status: cmmeta.ConditionTrue,
+						},
+					},
+				},
+			},
+			secrets: []runtime.Object{
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "target-secret"},
+					Data:       map[string][]byte{corev1.TLSPrivateKeyKey: mustGenerateRSA(t, 2048)},
+				},
+			},
+			expectedEvents: []string{`Warning CannotRegenerateKey User intervention required: existing private key in Secret "target-secret" does not match requirements on Certificate resource, mismatching fields: [spec.privateKey.algorithm], but cert-manager cannot create new private key as the Certificate's .spec.privateKey.rotationPolicy is unset or set to Never. To allow cert-manager to create a new private key you can set .spec.privateKey.rotationPolicy to 'Always' (this will result in the private key being regenerated every time a cert is renewed) `},
+			expectedActions: []testpkg.Action{},
+		},
+		"Secret algorithm mismatch, rotationPolicy=Always: should generate new key": {
+			certificate: &cmapi.Certificate{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test", UID: types.UID("test")},
+				Spec: cmapi.CertificateSpec{
+					SecretName: "target-secret",
+					PrivateKey: &cmapi.CertificatePrivateKey{
+						RotationPolicy: cmapi.RotationPolicyAlways,
+						Algorithm:      cmapi.ECDSAKeyAlgorithm,
+					},
+				},
+				Status: cmapi.CertificateStatus{
+					Conditions: []cmapi.CertificateCondition{
+						{
+							Type:   cmapi.CertificateConditionIssuing,
+							Status: cmmeta.ConditionTrue,
+						},
+					},
+				},
+			},
+			secrets: []runtime.Object{
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "target-secret"},
+					Data:       map[string][]byte{corev1.TLSPrivateKeyKey: mustGenerateRSA(t, 2048)},
+				},
+			},
+			expectedEvents: []string{`Normal Generated Stored new private key in temporary Secret resource "test-notrandom"`},
+			expectedActions: []testpkg.Action{
+				testpkg.NewAction(coretesting.NewGetAction(
+					cmapi.SchemeGroupVersion.WithResource("certificates"),
+					"testns",
+					"test",
+				)),
+				testpkg.NewAction(coretesting.NewUpdateSubresourceAction(
+					cmapi.SchemeGroupVersion.WithResource("certificates"),
+					"status",
+					"testns",
+					&cmapi.Certificate{
+						ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test", UID: types.UID("test")},
+						Spec: cmapi.CertificateSpec{
+							SecretName: "target-secret",
+							PrivateKey: &cmapi.CertificatePrivateKey{
+								RotationPolicy: cmapi.RotationPolicyAlways,
+								Algorithm:      cmapi.ECDSAKeyAlgorithm,
+							},
+						},
+						Status: cmapi.CertificateStatus{
+							NextPrivateKeySecretName: new("test-notrandom"),
+							Conditions: []cmapi.CertificateCondition{
+								{
+									Type:   cmapi.CertificateConditionIssuing,
+									Status: cmmeta.ConditionTrue,
+								},
+							},
+						},
+					},
+				)),
+				testpkg.NewCustomMatch(coretesting.NewCreateAction(
+					corev1.SchemeGroupVersion.WithResource("secrets"),
+					"testns",
+					&corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace:       "testns",
+							GenerateName:    "test-",
+							Labels:          map[string]string{cmapi.IsNextPrivateKeySecretLabelKey: "true", cmapi.PartOfCertManagerControllerLabelKey: "true"},
+							OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&cmapi.Certificate{ObjectMeta: metav1.ObjectMeta{Namespace: "testns", Name: "test"}}, certificateGvk)},
+						},
+						Data: map[string][]byte{"tls.key": nil},
+					},
+				), relaxedSecretMatcher),
+			},
+		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
