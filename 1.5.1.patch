@@ -1,394 +1,399 @@
 diff --git a/1.5.1.patch b/1.5.1.patch
-index 023250411..e69de29bb 100644
+index d4f27e299..e69de29bb 100644
 --- a/1.5.1.patch
 +++ b/1.5.1.patch
-@@ -1,98 +0,0 @@
--diff --git a/internal/apis/certmanager/validation/certificate.go b/internal/apis/certmanager/validation/certificate.go
--index 8a0b9f4f6..9500c2444 100644
----- a/internal/apis/certmanager/validation/certificate.go
--+++ b/internal/apis/certmanager/validation/certificate.go
--@@ -360,7 +360,7 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
+@@ -1,394 +0,0 @@
+-diff --git a/1.5.1.patch b/1.5.1.patch
+-index 023250411..e69de29bb 100644
+---- a/1.5.1.patch
+-+++ b/1.5.1.patch
+-@@ -1,98 +0,0 @@
+--diff --git a/internal/apis/certmanager/validation/certificate.go b/internal/apis/certmanager/validation/certificate.go
+--index 8a0b9f4f6..9500c2444 100644
+----- a/internal/apis/certmanager/validation/certificate.go
+--+++ b/internal/apis/certmanager/validation/certificate.go
+--@@ -360,7 +360,7 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
+-- 
+-- 	duration := util.DefaultCertDuration(crt.Duration)
+-- 	if duration < cmapi.MinimumCertificateDuration {
+---		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)))
+--+		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("certificate duration %s is invalid: must be greater than %s", duration, cmapi.MinimumCertificateDuration)))
+-- 	}
+-- 
+-- 	// Must set at most one of spec.renewBefore or spec.renewBeforePercentage.
+--@@ -371,11 +371,11 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
+-- 
+-- 	// If spec.renewBefore is set, check that it is not less than the minimum.
+-- 	if crt.RenewBefore != nil && crt.RenewBefore.Duration < cmapi.MinimumRenewBefore {
+---		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore)))
+--+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be greater than %s", crt.RenewBefore.Duration, cmapi.MinimumRenewBefore)))
+-- 	}
+-- 	// If spec.renewBefore is set, it must be less than the duration.
+-- 	if crt.RenewBefore != nil && crt.RenewBefore.Duration >= duration {
+---		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", duration, crt.RenewBefore.Duration)))
+--+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be less than duration %s", crt.RenewBefore.Duration, duration)))
+-- 	}
+-- 
+-- 	// If spec.renewBeforePercentage is set, check that it's within the allowed
+--@@ -383,10 +383,10 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
+-- 	if crt.RenewBeforePercentage != nil {
+-- 		renewBefore := duration * time.Duration(100-*crt.RenewBeforePercentage) / 100
+-- 		if renewBefore < cmapi.MinimumRenewBefore {
+---			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore greater than %s", cmapi.MinimumRenewBefore)))
+--+			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage %d%% is invalid: results in renewBefore %s which is less than minimum %s", *crt.RenewBeforePercentage, renewBefore, cmapi.MinimumRenewBefore)))
+-- 		}
+-- 		if renewBefore >= duration {
+---			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, "certificate renewBeforePercentage must result in a renewBefore less than duration"))
+--+			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage %d%% is invalid: results in renewBefore %s which is not less than duration %s", *crt.RenewBeforePercentage, renewBefore, duration)))
+-- 		}
+-- 	}
+-- 
+--diff --git a/internal/apis/certmanager/validation/certificate_test.go b/internal/apis/certmanager/validation/certificate_test.go
+--index 9064767c1..020798ead 100644
+----- a/internal/apis/certmanager/validation/certificate_test.go
+--+++ b/internal/apis/certmanager/validation/certificate_test.go
+--@@ -1011,7 +1011,7 @@ func TestValidateDuration(t *testing.T) {
+-- 					IssuerRef:   validIssuerRef,
+-- 				},
+-- 			},
+---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", cmapi.DefaultCertificateDuration, usefulDurations["ten years"].Duration))},
+--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be less than duration %s", usefulDurations["ten years"].Duration, cmapi.DefaultCertificateDuration))},
+-- 		},
+-- 		"renewBefore is bigger than the duration": {
+-- 			cfg: &internalcmapi.Certificate{
+--@@ -1023,7 +1023,7 @@ func TestValidateDuration(t *testing.T) {
+-- 					IssuerRef:   validIssuerRef,
+-- 				},
+-- 			},
+---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", usefulDurations["one month"].Duration, usefulDurations["one year"].Duration))},
+--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be less than duration %s", usefulDurations["one year"].Duration, usefulDurations["one month"].Duration))},
+-- 		},
+-- 		"renewBefore is less than the minimum permitted value": {
+-- 			cfg: &internalcmapi.Certificate{
+--@@ -1034,7 +1034,7 @@ func TestValidateDuration(t *testing.T) {
+-- 					IssuerRef:   validIssuerRef,
+-- 				},
+-- 			},
+---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore))},
+--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be greater than %s", usefulDurations["one second"].Duration, cmapi.MinimumRenewBefore))},
+-- 		},
+-- 		"renewBefore and renewBeforePercentage both set": {
+-- 			cfg: &internalcmapi.Certificate{
+--@@ -1081,7 +1081,7 @@ func TestValidateDuration(t *testing.T) {
+-- 					IssuerRef:             validIssuerRef,
+-- 				},
+-- 			},
+---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), "certificate renewBeforePercentage must result in a renewBefore less than duration")},
+--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), fmt.Sprintf("certificate renewBeforePercentage 0%% is invalid: results in renewBefore %s which is not less than duration %s", cmapi.DefaultCertificateDuration, cmapi.DefaultCertificateDuration))},
+-- 		},
+-- 		"renewBeforePercentage results in less than the minimum permitted value": {
+-- 			cfg: &internalcmapi.Certificate{
+--@@ -1092,7 +1092,7 @@ func TestValidateDuration(t *testing.T) {
+-- 					IssuerRef:             validIssuerRef,
+-- 				},
+-- 			},
+---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(100), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore greater than %s", cmapi.MinimumRenewBefore))},
+--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(100), fmt.Sprintf("certificate renewBeforePercentage 100%% is invalid: results in renewBefore 0s which is less than minimum %s", cmapi.MinimumRenewBefore))},
+-- 		},
+-- 		"duration is less than the minimum permitted value": {
+-- 			cfg: &internalcmapi.Certificate{
+--@@ -1104,7 +1104,7 @@ func TestValidateDuration(t *testing.T) {
+-- 					IssuerRef:   validIssuerRef,
+-- 				},
+-- 			},
+---			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration))},
+--+			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration %s is invalid: must be greater than %s", usefulDurations["half hour"].Duration, cmapi.MinimumCertificateDuration))},
+-- 		},
+-- 	}
+-- 	for n, s := range scenarios {
+-diff --git a/cmd/controller/app/options/options_test.go b/cmd/controller/app/options/options_test.go
+-index e9d01bc5c..d196589d0 100644
+---- a/cmd/controller/app/options/options_test.go
+-+++ b/cmd/controller/app/options/options_test.go
+-@@ -20,6 +20,7 @@ import (
+- 	"testing"
 - 
-- 	duration := util.DefaultCertDuration(crt.Duration)
-- 	if duration < cmapi.MinimumCertificateDuration {
---		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)))
--+		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("certificate duration %s is invalid: must be greater than %s", duration, cmapi.MinimumCertificateDuration)))
+- 	config "github.com/cert-manager/cert-manager/internal/apis/config/controller"
+-+	validation "github.com/cert-manager/cert-manager/internal/apis/config/controller/validation"
+- 	defaults "github.com/cert-manager/cert-manager/internal/apis/config/controller/v1alpha1"
+- 	"k8s.io/apimachinery/pkg/util/sets"
+- )
+-@@ -86,3 +87,86 @@ func TestEnabledControllers(t *testing.T) {
+- 		})
+- 	}
+- }
+-+
+-+func TestValidateControllerConfiguration(t *testing.T) {
+-+	tests := map[string]struct {
+-+		config       *config.ControllerConfiguration
+-+		expectErrors bool
+-+	}{
+-+		"default valid config should pass validation": {
+-+			config: func() *config.ControllerConfiguration {
+-+				cfg, _ := NewControllerConfiguration()
+-+				return cfg
+-+			}(),
+-+			expectErrors: false,
+-+		},
+-+		"valid namespace should pass validation": {
+-+			config: func() *config.ControllerConfiguration {
+-+				cfg, _ := NewControllerConfiguration()
+-+				cfg.Namespace = "valid-namespace"
+-+				return cfg
+-+			}(),
+-+			expectErrors: false,
+-+		},
+-+		"invalid namespace should fail validation": {
+-+			config: func() *config.ControllerConfiguration {
+-+				cfg, _ := NewControllerConfiguration()
+-+				cfg.Namespace = "INVALID_NAMESPACE!!"
+-+				return cfg
+-+			}(),
+-+			expectErrors: true,
+-+		},
+-+		"valid leader election namespace should pass validation": {
+-+			config: func() *config.ControllerConfiguration {
+-+				cfg, _ := NewControllerConfiguration()
+-+				cfg.LeaderElectionConfig.Enabled = true
+-+				cfg.LeaderElectionConfig.Namespace = "valid-leader-ns"
+-+				return cfg
+-+			}(),
+-+			expectErrors: false,
+-+		},
+-+		"invalid leader election namespace should fail validation": {
+-+			config: func() *config.ControllerConfiguration {
+-+				cfg, _ := NewControllerConfiguration()
+-+				cfg.LeaderElectionConfig.Enabled = true
+-+				cfg.LeaderElectionConfig.Namespace = "INVALID_LEADER_NS!!"
+-+				return cfg
+-+			}(),
+-+			expectErrors: true,
+-+		},
+-+		"zero concurrent workers should fail validation": {
+-+			config: func() *config.ControllerConfiguration {
+-+				cfg, _ := NewControllerConfiguration()
+-+				cfg.NumberOfConcurrentWorkers = 0
+-+				return cfg
+-+			}(),
+-+			expectErrors: true,
+-+		},
+-+		"negative concurrent workers should fail validation": {
+-+			config: func() *config.ControllerConfiguration {
+-+				cfg, _ := NewControllerConfiguration()
+-+				cfg.NumberOfConcurrentWorkers = -5
+-+				return cfg
+-+			}(),
+-+			expectErrors: true,
+-+		},
+-+		"one concurrent worker should pass validation": {
+-+			config: func() *config.ControllerConfiguration {
+-+				cfg, _ := NewControllerConfiguration()
+-+				cfg.NumberOfConcurrentWorkers = 1
+-+				return cfg
+-+			}(),
+-+			expectErrors: false,
+-+		},
+-+	}
+-+
+-+	for name, test := range tests {
+-+		t.Run(name, func(t *testing.T) {
+-+			errs := validation.ValidateControllerConfiguration(test.config, nil)
+-+			hasErrors := len(errs) > 0
+-+			if hasErrors != test.expectErrors {
+-+				t.Errorf("expected errors=%v, got errors=%v, errs=%v", test.expectErrors, hasErrors, errs)
+-+			}
+-+		})
+-+	}
+-+}
+-diff --git a/internal/apis/config/controller/validation/validation.go b/internal/apis/config/controller/validation/validation.go
+-index 0465e1556..e896822aa 100644
+---- a/internal/apis/config/controller/validation/validation.go
+-+++ b/internal/apis/config/controller/validation/validation.go
+-@@ -22,6 +22,7 @@ import (
+- 	"strings"
+- 
+- 	"k8s.io/apimachinery/pkg/util/sets"
+-+	"k8s.io/apimachinery/pkg/util/validation"
+- 	"k8s.io/apimachinery/pkg/util/validation/field"
+- 	logsapi "k8s.io/component-base/logs/api/v1"
+- 
+-@@ -57,6 +58,24 @@ func ValidateControllerConfiguration(cfg *config.ControllerConfiguration, fldPat
+- 		allErrors = append(allErrors, field.Invalid(fldPath.Child("kubernetesAPIBurst"), cfg.KubernetesAPIBurst, "must be higher or equal to kubernetesAPIQPS"))
 - 	}
 - 
-- 	// Must set at most one of spec.renewBefore or spec.renewBeforePercentage.
--@@ -371,11 +371,11 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
-- 
-- 	// If spec.renewBefore is set, check that it is not less than the minimum.
-- 	if crt.RenewBefore != nil && crt.RenewBefore.Duration < cmapi.MinimumRenewBefore {
---		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore)))
--+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be greater than %s", crt.RenewBefore.Duration, cmapi.MinimumRenewBefore)))
-- 	}
-- 	// If spec.renewBefore is set, it must be less than the duration.
-- 	if crt.RenewBefore != nil && crt.RenewBefore.Duration >= duration {
---		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", duration, crt.RenewBefore.Duration)))
--+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be less than duration %s", crt.RenewBefore.Duration, duration)))
-- 	}
-- 
-- 	// If spec.renewBeforePercentage is set, check that it's within the allowed
--@@ -383,10 +383,10 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
-- 	if crt.RenewBeforePercentage != nil {
-- 		renewBefore := duration * time.Duration(100-*crt.RenewBeforePercentage) / 100
-- 		if renewBefore < cmapi.MinimumRenewBefore {
---			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore greater than %s", cmapi.MinimumRenewBefore)))
--+			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage %d%% is invalid: results in renewBefore %s which is less than minimum %s", *crt.RenewBeforePercentage, renewBefore, cmapi.MinimumRenewBefore)))
-- 		}
-- 		if renewBefore >= duration {
---			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, "certificate renewBeforePercentage must result in a renewBefore less than duration"))
--+			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage %d%% is invalid: results in renewBefore %s which is not less than duration %s", *crt.RenewBeforePercentage, renewBefore, duration)))
-- 		}
-- 	}
-- 
--diff --git a/internal/apis/certmanager/validation/certificate_test.go b/internal/apis/certmanager/validation/certificate_test.go
--index 9064767c1..020798ead 100644
----- a/internal/apis/certmanager/validation/certificate_test.go
--+++ b/internal/apis/certmanager/validation/certificate_test.go
--@@ -1011,7 +1011,7 @@ func TestValidateDuration(t *testing.T) {
-- 					IssuerRef:   validIssuerRef,
+-+	if cfg.Namespace != "" {
+-+		errs := validation.IsDNS1123Label(cfg.Namespace)
+-+		if len(errs) > 0 {
+-+			allErrors = append(allErrors, field.Invalid(fldPath.Child("namespace"), cfg.Namespace, "must be a valid namespace: "+strings.Join(errs, ", ")))
+-+		}
+-+	}
+-+
+-+	if cfg.LeaderElectionConfig.Enabled && cfg.LeaderElectionConfig.Namespace != "" {
+-+		errs := validation.IsDNS1123Label(cfg.LeaderElectionConfig.Namespace)
+-+		if len(errs) > 0 {
+-+			allErrors = append(allErrors, field.Invalid(fldPath.Child("leaderElectionConfig").Child("namespace"), cfg.LeaderElectionConfig.Namespace, "must be a valid namespace: "+strings.Join(errs, ", ")))
+-+		}
+-+	}
+-+
+-+	if cfg.NumberOfConcurrentWorkers <= 0 {
+-+		allErrors = append(allErrors, field.Invalid(fldPath.Child("numberOfConcurrentWorkers"), cfg.NumberOfConcurrentWorkers, "must be greater than 0"))
+-+	}
+-+
+- 	for i, server := range cfg.ACMEHTTP01Config.SolverNameservers {
+- 		// ensure all servers have a port number
+- 		_, _, err := net.SplitHostPort(server)
+-diff --git a/internal/apis/config/controller/validation/validation_test.go b/internal/apis/config/controller/validation/validation_test.go
+-index 3ee12217d..406be7662 100644
+---- a/internal/apis/config/controller/validation/validation_test.go
+-+++ b/internal/apis/config/controller/validation/validation_test.go
+-@@ -53,12 +53,147 @@ func TestValidateControllerConfiguration(t *testing.T) {
+- 				IngressShimConfig: config.IngressShimConfig{
+- 					DefaultIssuerKind: "Issuer",
 - 				},
+--				KubernetesAPIBurst:  1,
+--				KubernetesAPIQPS:    1,
+--				PEMSizeLimitsConfig: validPEMSizeLimitsConfig(),
+-+				KubernetesAPIBurst:          1,
+-+				KubernetesAPIQPS:            1,
+-+				NumberOfConcurrentWorkers:   1,
+-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
 - 			},
---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", cmapi.DefaultCertificateDuration, usefulDurations["ten years"].Duration))},
--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be less than duration %s", usefulDurations["ten years"].Duration, cmapi.DefaultCertificateDuration))},
+- 			nil,
 - 		},
-- 		"renewBefore is bigger than the duration": {
-- 			cfg: &internalcmapi.Certificate{
--@@ -1023,7 +1023,7 @@ func TestValidateDuration(t *testing.T) {
-- 					IssuerRef:   validIssuerRef,
-- 				},
-- 			},
---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", usefulDurations["one month"].Duration, usefulDurations["one year"].Duration))},
--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be less than duration %s", usefulDurations["one year"].Duration, usefulDurations["one month"].Duration))},
-- 		},
-- 		"renewBefore is less than the minimum permitted value": {
-- 			cfg: &internalcmapi.Certificate{
--@@ -1034,7 +1034,7 @@ func TestValidateDuration(t *testing.T) {
-- 					IssuerRef:   validIssuerRef,
-- 				},
-- 			},
---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore))},
--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore %s is invalid: must be greater than %s", usefulDurations["one second"].Duration, cmapi.MinimumRenewBefore))},
-- 		},
-- 		"renewBefore and renewBeforePercentage both set": {
-- 			cfg: &internalcmapi.Certificate{
--@@ -1081,7 +1081,7 @@ func TestValidateDuration(t *testing.T) {
-- 					IssuerRef:             validIssuerRef,
-- 				},
-- 			},
---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), "certificate renewBeforePercentage must result in a renewBefore less than duration")},
--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), fmt.Sprintf("certificate renewBeforePercentage 0%% is invalid: results in renewBefore %s which is not less than duration %s", cmapi.DefaultCertificateDuration, cmapi.DefaultCertificateDuration))},
-- 		},
-- 		"renewBeforePercentage results in less than the minimum permitted value": {
-- 			cfg: &internalcmapi.Certificate{
--@@ -1092,7 +1092,7 @@ func TestValidateDuration(t *testing.T) {
-- 					IssuerRef:             validIssuerRef,
-- 				},
-- 			},
---			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(100), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore greater than %s", cmapi.MinimumRenewBefore))},
--+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(100), fmt.Sprintf("certificate renewBeforePercentage 100%% is invalid: results in renewBefore 0s which is less than minimum %s", cmapi.MinimumRenewBefore))},
-- 		},
-- 		"duration is less than the minimum permitted value": {
-- 			cfg: &internalcmapi.Certificate{
--@@ -1104,7 +1104,7 @@ func TestValidateDuration(t *testing.T) {
-- 					IssuerRef:   validIssuerRef,
-- 				},
-- 			},
---			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration))},
--+			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration %s is invalid: must be greater than %s", usefulDurations["half hour"].Duration, cmapi.MinimumCertificateDuration))},
-- 		},
-- 	}
-- 	for n, s := range scenarios {
-diff --git a/cmd/controller/app/options/options_test.go b/cmd/controller/app/options/options_test.go
-index e9d01bc5c..d196589d0 100644
---- a/cmd/controller/app/options/options_test.go
-+++ b/cmd/controller/app/options/options_test.go
-@@ -20,6 +20,7 @@ import (
- 	"testing"
- 
- 	config "github.com/cert-manager/cert-manager/internal/apis/config/controller"
-+	validation "github.com/cert-manager/cert-manager/internal/apis/config/controller/validation"
- 	defaults "github.com/cert-manager/cert-manager/internal/apis/config/controller/v1alpha1"
- 	"k8s.io/apimachinery/pkg/util/sets"
- )
-@@ -86,3 +87,86 @@ func TestEnabledControllers(t *testing.T) {
- 		})
- 	}
- }
-+
-+func TestValidateControllerConfiguration(t *testing.T) {
-+	tests := map[string]struct {
-+		config       *config.ControllerConfiguration
-+		expectErrors bool
-+	}{
-+		"default valid config should pass validation": {
-+			config: func() *config.ControllerConfiguration {
-+				cfg, _ := NewControllerConfiguration()
-+				return cfg
-+			}(),
-+			expectErrors: false,
-+		},
-+		"valid namespace should pass validation": {
-+			config: func() *config.ControllerConfiguration {
-+				cfg, _ := NewControllerConfiguration()
-+				cfg.Namespace = "valid-namespace"
-+				return cfg
-+			}(),
-+			expectErrors: false,
-+		},
-+		"invalid namespace should fail validation": {
-+			config: func() *config.ControllerConfiguration {
-+				cfg, _ := NewControllerConfiguration()
-+				cfg.Namespace = "INVALID_NAMESPACE!!"
-+				return cfg
-+			}(),
-+			expectErrors: true,
-+		},
-+		"valid leader election namespace should pass validation": {
-+			config: func() *config.ControllerConfiguration {
-+				cfg, _ := NewControllerConfiguration()
-+				cfg.LeaderElectionConfig.Enabled = true
-+				cfg.LeaderElectionConfig.Namespace = "valid-leader-ns"
-+				return cfg
-+			}(),
-+			expectErrors: false,
-+		},
-+		"invalid leader election namespace should fail validation": {
-+			config: func() *config.ControllerConfiguration {
-+				cfg, _ := NewControllerConfiguration()
-+				cfg.LeaderElectionConfig.Enabled = true
-+				cfg.LeaderElectionConfig.Namespace = "INVALID_LEADER_NS!!"
-+				return cfg
-+			}(),
-+			expectErrors: true,
-+		},
-+		"zero concurrent workers should fail validation": {
-+			config: func() *config.ControllerConfiguration {
-+				cfg, _ := NewControllerConfiguration()
-+				cfg.NumberOfConcurrentWorkers = 0
-+				return cfg
-+			}(),
-+			expectErrors: true,
-+		},
-+		"negative concurrent workers should fail validation": {
-+			config: func() *config.ControllerConfiguration {
-+				cfg, _ := NewControllerConfiguration()
-+				cfg.NumberOfConcurrentWorkers = -5
-+				return cfg
-+			}(),
-+			expectErrors: true,
-+		},
-+		"one concurrent worker should pass validation": {
-+			config: func() *config.ControllerConfiguration {
-+				cfg, _ := NewControllerConfiguration()
-+				cfg.NumberOfConcurrentWorkers = 1
-+				return cfg
-+			}(),
-+			expectErrors: false,
-+		},
-+	}
-+
-+	for name, test := range tests {
-+		t.Run(name, func(t *testing.T) {
-+			errs := validation.ValidateControllerConfiguration(test.config, nil)
-+			hasErrors := len(errs) > 0
-+			if hasErrors != test.expectErrors {
-+				t.Errorf("expected errors=%v, got errors=%v, errs=%v", test.expectErrors, hasErrors, errs)
-+			}
-+		})
-+	}
-+}
-diff --git a/internal/apis/config/controller/validation/validation.go b/internal/apis/config/controller/validation/validation.go
-index 0465e1556..e896822aa 100644
---- a/internal/apis/config/controller/validation/validation.go
-+++ b/internal/apis/config/controller/validation/validation.go
-@@ -22,6 +22,7 @@ import (
- 	"strings"
- 
- 	"k8s.io/apimachinery/pkg/util/sets"
-+	"k8s.io/apimachinery/pkg/util/validation"
- 	"k8s.io/apimachinery/pkg/util/validation/field"
- 	logsapi "k8s.io/component-base/logs/api/v1"
- 
-@@ -57,6 +58,24 @@ func ValidateControllerConfiguration(cfg *config.ControllerConfiguration, fldPat
- 		allErrors = append(allErrors, field.Invalid(fldPath.Child("kubernetesAPIBurst"), cfg.KubernetesAPIBurst, "must be higher or equal to kubernetesAPIQPS"))
- 	}
- 
-+	if cfg.Namespace != "" {
-+		errs := validation.IsDNS1123Label(cfg.Namespace)
-+		if len(errs) > 0 {
-+			allErrors = append(allErrors, field.Invalid(fldPath.Child("namespace"), cfg.Namespace, "must be a valid namespace: "+strings.Join(errs, ", ")))
-+		}
-+	}
-+
-+	if cfg.LeaderElectionConfig.Enabled && cfg.LeaderElectionConfig.Namespace != "" {
-+		errs := validation.IsDNS1123Label(cfg.LeaderElectionConfig.Namespace)
-+		if len(errs) > 0 {
-+			allErrors = append(allErrors, field.Invalid(fldPath.Child("leaderElectionConfig").Child("namespace"), cfg.LeaderElectionConfig.Namespace, "must be a valid namespace: "+strings.Join(errs, ", ")))
-+		}
-+	}
-+
-+	if cfg.NumberOfConcurrentWorkers <= 0 {
-+		allErrors = append(allErrors, field.Invalid(fldPath.Child("numberOfConcurrentWorkers"), cfg.NumberOfConcurrentWorkers, "must be greater than 0"))
-+	}
-+
- 	for i, server := range cfg.ACMEHTTP01Config.SolverNameservers {
- 		// ensure all servers have a port number
- 		_, _, err := net.SplitHostPort(server)
-diff --git a/internal/apis/config/controller/validation/validation_test.go b/internal/apis/config/controller/validation/validation_test.go
-index 3ee12217d..406be7662 100644
---- a/internal/apis/config/controller/validation/validation_test.go
-+++ b/internal/apis/config/controller/validation/validation_test.go
-@@ -53,12 +53,147 @@ func TestValidateControllerConfiguration(t *testing.T) {
- 				IngressShimConfig: config.IngressShimConfig{
- 					DefaultIssuerKind: "Issuer",
- 				},
--				KubernetesAPIBurst:  1,
--				KubernetesAPIQPS:    1,
--				PEMSizeLimitsConfig: validPEMSizeLimitsConfig(),
-+				KubernetesAPIBurst:          1,
-+				KubernetesAPIQPS:            1,
-+				NumberOfConcurrentWorkers:   1,
-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
- 			},
- 			nil,
- 		},
-+		{
-+			"with valid namespace",
-+			&config.ControllerConfiguration{
-+				Logging: logsapi.LoggingConfiguration{
-+					Format: "text",
-+				},
-+				IngressShimConfig: config.IngressShimConfig{
-+					DefaultIssuerKind: "Issuer",
-+				},
-+				KubernetesAPIBurst:          1,
-+				KubernetesAPIQPS:            1,
-+				Namespace:                   "valid-namespace",
-+				NumberOfConcurrentWorkers:   1,
-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
-+			},
-+			nil,
-+		},
-+		{
-+			"with invalid namespace",
-+			&config.ControllerConfiguration{
-+				Logging: logsapi.LoggingConfiguration{
-+					Format: "text",
-+				},
-+				IngressShimConfig: config.IngressShimConfig{
-+					DefaultIssuerKind: "Issuer",
-+				},
-+				KubernetesAPIBurst:          1,
-+				KubernetesAPIQPS:            1,
-+				Namespace:                   "INVALID_NAMESPACE!!",
-+				NumberOfConcurrentWorkers:   1,
-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
-+			},
-+			func(cc *config.ControllerConfiguration) field.ErrorList {
-+				return field.ErrorList{
-+					field.Invalid(field.NewPath("namespace"), cc.Namespace, "must be a valid namespace: a lowercase RFC 1123 label must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?')"),
-+				}
-+			},
-+		},
-+		{
-+			"with valid leader election namespace",
-+			&config.ControllerConfiguration{
-+				Logging: logsapi.LoggingConfiguration{
-+					Format: "text",
-+				},
-+				IngressShimConfig: config.IngressShimConfig{
-+					DefaultIssuerKind: "Issuer",
-+				},
-+				KubernetesAPIBurst: 1,
-+				KubernetesAPIQPS:   1,
-+				LeaderElectionConfig: config.LeaderElectionConfig{
-+					LeaderElectionConfig: shared.LeaderElectionConfig{
-+						Enabled:       true,
-+						LeaseDuration: time.Second,
-+						RenewDeadline: time.Second,
-+						RetryPeriod:   time.Second,
-+					},
-+					HealthzTimeout: time.Second,
-+					Namespace:      "valid-leader-ns",
-+				},
-+				NumberOfConcurrentWorkers: 1,
-+				PEMSizeLimitsConfig:       validPEMSizeLimitsConfig(),
-+			},
-+			nil,
-+		},
-+		{
-+			"with invalid leader election namespace",
-+			&config.ControllerConfiguration{
-+				Logging: logsapi.LoggingConfiguration{
-+					Format: "text",
-+				},
-+				IngressShimConfig: config.IngressShimConfig{
-+					DefaultIssuerKind: "Issuer",
-+				},
-+				KubernetesAPIBurst: 1,
-+				KubernetesAPIQPS:   1,
-+				LeaderElectionConfig: config.LeaderElectionConfig{
-+					LeaderElectionConfig: shared.LeaderElectionConfig{
-+						Enabled:       true,
-+						LeaseDuration: time.Second,
-+						RenewDeadline: time.Second,
-+						RetryPeriod:   time.Second,
-+					},
-+					HealthzTimeout: time.Second,
-+					Namespace:      "INVALID_LEADER_NS!!",
-+				},
-+				NumberOfConcurrentWorkers: 1,
-+				PEMSizeLimitsConfig:       validPEMSizeLimitsConfig(),
-+			},
-+			func(cc *config.ControllerConfiguration) field.ErrorList {
-+				return field.ErrorList{
-+					field.Invalid(field.NewPath("leaderElectionConfig").Child("namespace"), cc.LeaderElectionConfig.Namespace, "must be a valid namespace: a lowercase RFC 1123 label must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?')"),
-+				}
-+			},
-+		},
-+		{
-+			"with zero concurrent workers",
-+			&config.ControllerConfiguration{
-+				Logging: logsapi.LoggingConfiguration{
-+					Format: "text",
-+				},
-+				IngressShimConfig: config.IngressShimConfig{
-+					DefaultIssuerKind: "Issuer",
-+				},
-+				KubernetesAPIBurst:          1,
-+				KubernetesAPIQPS:            1,
-+				NumberOfConcurrentWorkers:   0,
-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
-+			},
-+			func(cc *config.ControllerConfiguration) field.ErrorList {
-+				return field.ErrorList{
-+					field.Invalid(field.NewPath("numberOfConcurrentWorkers"), cc.NumberOfConcurrentWorkers, "must be greater than 0"),
-+				}
-+			},
-+		},
-+		{
-+			"with negative concurrent workers",
-+			&config.ControllerConfiguration{
-+				Logging: logsapi.LoggingConfiguration{
-+					Format: "text",
-+				},
-+				IngressShimConfig: config.IngressShimConfig{
-+					DefaultIssuerKind: "Issuer",
-+				},
-+				KubernetesAPIBurst:          1,
-+				KubernetesAPIQPS:            1,
-+				NumberOfConcurrentWorkers:   -5,
-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
-+			},
-+			func(cc *config.ControllerConfiguration) field.ErrorList {
-+				return field.ErrorList{
-+					field.Invalid(field.NewPath("numberOfConcurrentWorkers"), cc.NumberOfConcurrentWorkers, "must be greater than 0"),
-+				}
-+			},
-+		},
- 		{
- 			"with invalid logging config",
- 			&config.ControllerConfiguration{
+-+		{
+-+			"with valid namespace",
+-+			&config.ControllerConfiguration{
+-+				Logging: logsapi.LoggingConfiguration{
+-+					Format: "text",
+-+				},
+-+				IngressShimConfig: config.IngressShimConfig{
+-+					DefaultIssuerKind: "Issuer",
+-+				},
+-+				KubernetesAPIBurst:          1,
+-+				KubernetesAPIQPS:            1,
+-+				Namespace:                   "valid-namespace",
+-+				NumberOfConcurrentWorkers:   1,
+-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
+-+			},
+-+			nil,
+-+		},
+-+		{
+-+			"with invalid namespace",
+-+			&config.ControllerConfiguration{
+-+				Logging: logsapi.LoggingConfiguration{
+-+					Format: "text",
+-+				},
+-+				IngressShimConfig: config.IngressShimConfig{
+-+					DefaultIssuerKind: "Issuer",
+-+				},
+-+				KubernetesAPIBurst:          1,
+-+				KubernetesAPIQPS:            1,
+-+				Namespace:                   "INVALID_NAMESPACE!!",
+-+				NumberOfConcurrentWorkers:   1,
+-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
+-+			},
+-+			func(cc *config.ControllerConfiguration) field.ErrorList {
+-+				return field.ErrorList{
+-+					field.Invalid(field.NewPath("namespace"), cc.Namespace, "must be a valid namespace: a lowercase RFC 1123 label must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?')"),
+-+				}
+-+			},
+-+		},
+-+		{
+-+			"with valid leader election namespace",
+-+			&config.ControllerConfiguration{
+-+				Logging: logsapi.LoggingConfiguration{
+-+					Format: "text",
+-+				},
+-+				IngressShimConfig: config.IngressShimConfig{
+-+					DefaultIssuerKind: "Issuer",
+-+				},
+-+				KubernetesAPIBurst: 1,
+-+				KubernetesAPIQPS:   1,
+-+				LeaderElectionConfig: config.LeaderElectionConfig{
+-+					LeaderElectionConfig: shared.LeaderElectionConfig{
+-+						Enabled:       true,
+-+						LeaseDuration: time.Second,
+-+						RenewDeadline: time.Second,
+-+						RetryPeriod:   time.Second,
+-+					},
+-+					HealthzTimeout: time.Second,
+-+					Namespace:      "valid-leader-ns",
+-+				},
+-+				NumberOfConcurrentWorkers: 1,
+-+				PEMSizeLimitsConfig:       validPEMSizeLimitsConfig(),
+-+			},
+-+			nil,
+-+		},
+-+		{
+-+			"with invalid leader election namespace",
+-+			&config.ControllerConfiguration{
+-+				Logging: logsapi.LoggingConfiguration{
+-+					Format: "text",
+-+				},
+-+				IngressShimConfig: config.IngressShimConfig{
+-+					DefaultIssuerKind: "Issuer",
+-+				},
+-+				KubernetesAPIBurst: 1,
+-+				KubernetesAPIQPS:   1,
+-+				LeaderElectionConfig: config.LeaderElectionConfig{
+-+					LeaderElectionConfig: shared.LeaderElectionConfig{
+-+						Enabled:       true,
+-+						LeaseDuration: time.Second,
+-+						RenewDeadline: time.Second,
+-+						RetryPeriod:   time.Second,
+-+					},
+-+					HealthzTimeout: time.Second,
+-+					Namespace:      "INVALID_LEADER_NS!!",
+-+				},
+-+				NumberOfConcurrentWorkers: 1,
+-+				PEMSizeLimitsConfig:       validPEMSizeLimitsConfig(),
+-+			},
+-+			func(cc *config.ControllerConfiguration) field.ErrorList {
+-+				return field.ErrorList{
+-+					field.Invalid(field.NewPath("leaderElectionConfig").Child("namespace"), cc.LeaderElectionConfig.Namespace, "must be a valid namespace: a lowercase RFC 1123 label must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?')"),
+-+				}
+-+			},
+-+		},
+-+		{
+-+			"with zero concurrent workers",
+-+			&config.ControllerConfiguration{
+-+				Logging: logsapi.LoggingConfiguration{
+-+					Format: "text",
+-+				},
+-+				IngressShimConfig: config.IngressShimConfig{
+-+					DefaultIssuerKind: "Issuer",
+-+				},
+-+				KubernetesAPIBurst:          1,
+-+				KubernetesAPIQPS:            1,
+-+				NumberOfConcurrentWorkers:   0,
+-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
+-+			},
+-+			func(cc *config.ControllerConfiguration) field.ErrorList {
+-+				return field.ErrorList{
+-+					field.Invalid(field.NewPath("numberOfConcurrentWorkers"), cc.NumberOfConcurrentWorkers, "must be greater than 0"),
+-+				}
+-+			},
+-+		},
+-+		{
+-+			"with negative concurrent workers",
+-+			&config.ControllerConfiguration{
+-+				Logging: logsapi.LoggingConfiguration{
+-+					Format: "text",
+-+				},
+-+				IngressShimConfig: config.IngressShimConfig{
+-+					DefaultIssuerKind: "Issuer",
+-+				},
+-+				KubernetesAPIBurst:          1,
+-+				KubernetesAPIQPS:            1,
+-+				NumberOfConcurrentWorkers:   -5,
+-+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
+-+			},
+-+			func(cc *config.ControllerConfiguration) field.ErrorList {
+-+				return field.ErrorList{
+-+					field.Invalid(field.NewPath("numberOfConcurrentWorkers"), cc.NumberOfConcurrentWorkers, "must be greater than 0"),
+-+				}
+-+			},
+-+		},
+- 		{
+- 			"with invalid logging config",
+- 			&config.ControllerConfiguration{
