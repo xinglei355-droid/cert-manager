@@ -112,3 +112,73 @@ Some tools must be installed locally, however. The build system will alert you i
 tool cannot be found, and these tools are documented [on the website](https://cert-manager.io/docs/contributing/building/#prerequisites).
 
 Specifically, note that you can choose to use your system version of Go or to [download a vendored copy](https://cert-manager.io/docs/contributing/building/#go-versions).
+
+## Running Tests
+
+cert-manager is a multi-module Go project. The root `go.mod` covers `pkg/`, `internal/`, and `test/`, while each binary under `cmd/` has its own `go.mod` (e.g., `cmd/controller/go.mod`).
+
+### Quick Start: Run a Single Package Unit Test
+
+From the repository root, use `test-pretty` to run a specific package's unit tests with
+pretty output. This target does **not** require etcd or kube-apiserver, making it fast
+and suitable for local development:
+
+```console
+# Run tests for a single package in the root module
+make test-pretty WHAT=./pkg/util/pki
+
+# Run tests for a subtree
+make test-pretty WHAT=./pkg/controller/...
+```
+
+### Running Tests in Sub-Modules
+
+For packages under `cmd/controller`, `cmd/acmesolver`, `cmd/webhook`, etc., first `cd`
+into the sub-module directory, then run `go test` directly:
+
+```console
+# Run all controller binary tests
+cd cmd/controller && go test ./...
+
+# Run a single package in the controller binary
+cd cmd/controller && go test ./app/options/
+```
+
+Or use the provided `unit-test-*` make targets:
+
+```console
+make unit-test-controller   # all controller binary tests
+make unit-test-acmesolver   # all acmesolver binary tests
+make unit-test-core-module  # all root module unit tests
+```
+
+### Running All Unit Tests
+
+```console
+make unit-test
+```
+
+This runs all unit tests across all modules (core, controller, acmesolver, cainjector,
+webhook, third_party) without requiring etcd or kube-apiserver.
+
+### Running All Tests (Including Integration Tests)
+
+```console
+make test
+```
+
+This requires additional dependencies (etcd, kube-apiserver, kubectl) which will be
+downloaded automatically. Use `WHAT` to narrow the scope:
+
+```console
+make test WHAT=./pkg/...
+```
+
+### CI Test Targets
+
+The `make test-ci` target runs all tests and generates JUnit XML reports. It is used
+in CI pipelines and should not be modified without understanding the CI workflow.
+
+```console
+make test-ci
+```

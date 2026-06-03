@@ -17,8 +17,8 @@ export KUBEBUILDER_ASSETS=$(PWD)/$(bin_dir)/tools
 # GOTESTSUM_CI_FLAGS contains flags which are common to invocations of gotestsum in CI environments
 GOTESTSUM_CI_FLAGS := --junitfile-testsuite-name short --junitfile-testcase-classname relative
 
-# WHAT can be used to control which unit tests are run by "make test"; defaults to running all
-# tests except e2e tests (which require more significant setup)
+# WHAT can be used to control which tests are run by "make test" and "make test-pretty";
+# defaults to running all tests except e2e tests (which require more significant setup)
 # For example: make WHAT=./pkg/util/pki test-pretty to only run the PKI utils tests
 WHAT ?= ./pkg/... ./internal/... ./test/... ./hack/prune-junit-xml/...
 
@@ -60,6 +60,22 @@ test-ci: setup-integration-tests | $(NEEDS_GOTESTSUM) $(NEEDS_ETCD) $(NEEDS_KUBE
 	cd test/integration && $(GOTESTSUM) --junitfile $(ARTIFACTS)/junit_make-test-ci-integration.xml $(GOTESTSUM_CI_FLAGS) --post-run-command $$'bash -c "$(GO) run ../../hack/prune-junit-xml/prunexml.go $$GOTESTSUM_JUNITFILE"' -- ./...
 	$(GOTESTSUM) --junitfile $(ARTIFACTS)/junit_make-test-ci-thirdparty.xml $(GOTESTSUM_CI_FLAGS) --post-run-command $$'bash -c "$(GO) run ./hack/prune-junit-xml/prunexml.go $$GOTESTSUM_JUNITFILE"' -- ./third_party/...
 	$(GOTESTSUM) --junitfile $(ARTIFACTS)/junit_make-test-ci-livedns.xml $(GOTESTSUM_CI_FLAGS) --post-run-command $$'bash -c "$(GO) run ./hack/prune-junit-xml/prunexml.go $$GOTESTSUM_JUNITFILE"' -- --tags=livedns_test ./pkg/issuer/acme/dns/util/...
+
+.PHONY: test-pretty
+## Run unit tests from the root Go module with pretty output. Use WHAT to
+## select specific packages. This target does NOT require etcd or kube-apiserver.
+##
+## Examples:
+##   make test-pretty WHAT=./pkg/util/pki          # single package
+##   make test-pretty WHAT=./pkg/controller/...    # subtree
+##
+## For sub-modules (cmd/controller, cmd/acmesolver, etc.), use:
+##   cd cmd/controller && gotestsum --format testname -- ./app/...
+## Or use the unit-test-controller / unit-test-* targets below.
+##
+## @category Development
+test-pretty: | $(NEEDS_GOTESTSUM)
+	$(GOTESTSUM) --format testname -- $(WHAT)
 
 .PHONY: unit-test
 ## Same as `test` but only runs the unit tests. By "unit tests", we mean tests

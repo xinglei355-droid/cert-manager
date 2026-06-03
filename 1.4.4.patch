@@ -1,0 +1,116 @@
+diff --git a/make/README.md b/make/README.md
+index c0df6e2a7..c01b3dc27 100644
+--- a/make/README.md
++++ b/make/README.md
+@@ -112,3 +112,73 @@ Some tools must be installed locally, however. The build system will alert you i
+ tool cannot be found, and these tools are documented [on the website](https://cert-manager.io/docs/contributing/building/#prerequisites).
+ 
+ Specifically, note that you can choose to use your system version of Go or to [download a vendored copy](https://cert-manager.io/docs/contributing/building/#go-versions).
++
++## Running Tests
++
++cert-manager is a multi-module Go project. The root `go.mod` covers `pkg/`, `internal/`, and `test/`, while each binary under `cmd/` has its own `go.mod` (e.g., `cmd/controller/go.mod`).
++
++### Quick Start: Run a Single Package Unit Test
++
++From the repository root, use `test-pretty` to run a specific package's unit tests with
++pretty output. This target does **not** require etcd or kube-apiserver, making it fast
++and suitable for local development:
++
++```console
++# Run tests for a single package in the root module
++make test-pretty WHAT=./pkg/util/pki
++
++# Run tests for a subtree
++make test-pretty WHAT=./pkg/controller/...
++```
++
++### Running Tests in Sub-Modules
++
++For packages under `cmd/controller`, `cmd/acmesolver`, `cmd/webhook`, etc., first `cd`
++into the sub-module directory, then run `go test` directly:
++
++```console
++# Run all controller binary tests
++cd cmd/controller && go test ./...
++
++# Run a single package in the controller binary
++cd cmd/controller && go test ./app/options/
++```
++
++Or use the provided `unit-test-*` make targets:
++
++```console
++make unit-test-controller   # all controller binary tests
++make unit-test-acmesolver   # all acmesolver binary tests
++make unit-test-core-module  # all root module unit tests
++```
++
++### Running All Unit Tests
++
++```console
++make unit-test
++```
++
++This runs all unit tests across all modules (core, controller, acmesolver, cainjector,
++webhook, third_party) without requiring etcd or kube-apiserver.
++
++### Running All Tests (Including Integration Tests)
++
++```console
++make test
++```
++
++This requires additional dependencies (etcd, kube-apiserver, kubectl) which will be
++downloaded automatically. Use `WHAT` to narrow the scope:
++
++```console
++make test WHAT=./pkg/...
++```
++
++### CI Test Targets
++
++The `make test-ci` target runs all tests and generates JUnit XML reports. It is used
++in CI pipelines and should not be modified without understanding the CI workflow.
++
++```console
++make test-ci
++```
+diff --git a/make/test.mk b/make/test.mk
+index f9fb74615..cbdf4ce21 100644
+--- a/make/test.mk
++++ b/make/test.mk
+@@ -17,8 +17,8 @@ export KUBEBUILDER_ASSETS=$(PWD)/$(bin_dir)/tools
+ # GOTESTSUM_CI_FLAGS contains flags which are common to invocations of gotestsum in CI environments
+ GOTESTSUM_CI_FLAGS := --junitfile-testsuite-name short --junitfile-testcase-classname relative
+ 
+-# WHAT can be used to control which unit tests are run by "make test"; defaults to running all
+-# tests except e2e tests (which require more significant setup)
++# WHAT can be used to control which tests are run by "make test" and "make test-pretty";
++# defaults to running all tests except e2e tests (which require more significant setup)
+ # For example: make WHAT=./pkg/util/pki test-pretty to only run the PKI utils tests
+ WHAT ?= ./pkg/... ./internal/... ./test/... ./hack/prune-junit-xml/...
+ 
+@@ -61,6 +61,22 @@ test-ci: setup-integration-tests | $(NEEDS_GOTESTSUM) $(NEEDS_ETCD) $(NEEDS_KUBE
+ 	$(GOTESTSUM) --junitfile $(ARTIFACTS)/junit_make-test-ci-thirdparty.xml $(GOTESTSUM_CI_FLAGS) --post-run-command $$'bash -c "$(GO) run ./hack/prune-junit-xml/prunexml.go $$GOTESTSUM_JUNITFILE"' -- ./third_party/...
+ 	$(GOTESTSUM) --junitfile $(ARTIFACTS)/junit_make-test-ci-livedns.xml $(GOTESTSUM_CI_FLAGS) --post-run-command $$'bash -c "$(GO) run ./hack/prune-junit-xml/prunexml.go $$GOTESTSUM_JUNITFILE"' -- --tags=livedns_test ./pkg/issuer/acme/dns/util/...
+ 
++.PHONY: test-pretty
++## Run unit tests from the root Go module with pretty output. Use WHAT to
++## select specific packages. This target does NOT require etcd or kube-apiserver.
++##
++## Examples:
++##   make test-pretty WHAT=./pkg/util/pki          # single package
++##   make test-pretty WHAT=./pkg/controller/...    # subtree
++##
++## For sub-modules (cmd/controller, cmd/acmesolver, etc.), use:
++##   cd cmd/controller && gotestsum --format testname -- ./app/...
++## Or use the unit-test-controller / unit-test-* targets below.
++##
++## @category Development
++test-pretty: | $(NEEDS_GOTESTSUM)
++	$(GOTESTSUM) --format testname -- $(WHAT)
++
+ .PHONY: unit-test
+ ## Same as `test` but only runs the unit tests. By "unit tests", we mean tests
+ ## that are quick to run and don't require dependencies like Kubernetes, etcd,
