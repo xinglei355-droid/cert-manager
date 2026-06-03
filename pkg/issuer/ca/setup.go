@@ -18,6 +18,7 @@ package ca
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -34,7 +35,8 @@ const (
 
 	successKeyPairVerified = "KeyPairVerified"
 
-	messageErrorGetKeyPair = "Error getting keypair for CA issuer: "
+	messageErrorGetKeyPair    = "Error getting keypair for CA issuer: "
+	messageErrorInvalidKeyPair = "Signing CA certificate is not a CA: "
 
 	messageKeyPairVerified = "Signing CA verified"
 )
@@ -65,11 +67,10 @@ func (c *CA) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
 
 	log = logf.WithRelatedResourceName(log, issuer.GetSpec().CA.SecretName, resourceNamespace, "Secret")
 	if !cert.IsCA {
-		s := messageErrorGetKeyPair + "certificate is not a CA"
+		s := fmt.Sprintf("%scertificate signed by secret %q is not a CA", messageErrorInvalidKeyPair, issuer.GetSpec().CA.SecretName)
 		log.Error(nil, "signing certificate is not a CA")
 		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorInvalidKeyPair, s)
 		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorInvalidKeyPair, s)
-		// Don't return an error here as there is nothing more we can do
 		return nil
 	}
 

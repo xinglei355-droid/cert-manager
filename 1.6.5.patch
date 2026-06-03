@@ -1,0 +1,109 @@
+diff --git a/pkg/issuer/acme/setup.go b/pkg/issuer/acme/setup.go
+index 315cde9d1..118c92fcb 100644
+--- a/pkg/issuer/acme/setup.go
++++ b/pkg/issuer/acme/setup.go
+@@ -60,7 +60,7 @@ const (
+ 
+ 	messageAccountRegistrationFailed     = "Failed to register ACME account: "
+ 	messageAccountVerificationFailed     = "Failed to verify ACME account: "
+-	messageAccountUpdateFailed           = "Failed to update ACME account:"
++	messageAccountUpdateFailed           = "Failed to update ACME account: "
+ 	messageAccountRegistered             = "The ACME account was registered with the ACME server"
+ 	messageAccountVerified               = "The ACME account was verified with the ACME server"
+ 	messageNoSecretKeyGenerationDisabled = "the ACME issuer config has 'disableAccountKeyGeneration' set to true, but the secret was not found: "
+diff --git a/pkg/issuer/ca/setup.go b/pkg/issuer/ca/setup.go
+index 70bd0df12..3a47a13ac 100644
+--- a/pkg/issuer/ca/setup.go
++++ b/pkg/issuer/ca/setup.go
+@@ -18,6 +18,7 @@ package ca
+ 
+ import (
+ 	"context"
++	"fmt"
+ 
+ 	corev1 "k8s.io/api/core/v1"
+ 
+@@ -34,7 +35,8 @@ const (
+ 
+ 	successKeyPairVerified = "KeyPairVerified"
+ 
+-	messageErrorGetKeyPair = "Error getting keypair for CA issuer: "
++	messageErrorGetKeyPair    = "Error getting keypair for CA issuer: "
++	messageErrorInvalidKeyPair = "Signing CA certificate is not a CA: "
+ 
+ 	messageKeyPairVerified = "Signing CA verified"
+ )
+@@ -65,11 +67,10 @@ func (c *CA) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
+ 
+ 	log = logf.WithRelatedResourceName(log, issuer.GetSpec().CA.SecretName, resourceNamespace, "Secret")
+ 	if !cert.IsCA {
+-		s := messageErrorGetKeyPair + "certificate is not a CA"
++		s := fmt.Sprintf("%scertificate signed by secret %q is not a CA", messageErrorInvalidKeyPair, issuer.GetSpec().CA.SecretName)
+ 		log.Error(nil, "signing certificate is not a CA")
+ 		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorInvalidKeyPair, s)
+ 		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorInvalidKeyPair, s)
+-		// Don't return an error here as there is nothing more we can do
+ 		return nil
+ 	}
+ 
+diff --git a/pkg/issuer/vault/setup.go b/pkg/issuer/vault/setup.go
+index cb429f8a2..d386827af 100644
+--- a/pkg/issuer/vault/setup.go
++++ b/pkg/issuer/vault/setup.go
+@@ -38,6 +38,8 @@ const (
+ 	messageVaultClientInitFailed             = "Failed to initialize Vault client"
+ 	messageVaultInitializedAndUnsealedFailed = "Failed to verify Vault is initialized and unsealed"
+ 	messageVaultConfigRequired               = "Vault config cannot be empty"
++	messageServerRequired                    = "Vault server is a required field"
++	messagePathRequired                      = "Vault path is a required field"
+ 	messageServerAndPathRequired             = "Vault server and path are required fields"
+ 	messageAuthFieldsRequired                = "Vault tokenSecretRef, appRole, clientCertificate, kubernetes, or aws is required"
+ 	messageMultipleAuthFieldsSet             = "Multiple auth methods cannot be set on the same Vault issuer"
+@@ -59,10 +61,15 @@ func (v *Vault) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
+ 	}
+ 
+ 	// check if Vault server info is specified.
+-	if issuer.GetSpec().Vault.Server == "" ||
+-		issuer.GetSpec().Vault.Path == "" {
+-		logf.FromContext(ctx).V(logf.WarnLevel).Info(messageServerAndPathRequired, "issuer", klog.KObj(issuer))
+-		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messageServerAndPathRequired)
++	if issuer.GetSpec().Vault.Server == "" || issuer.GetSpec().Vault.Path == "" {
++		msg := messageServerAndPathRequired
++		if issuer.GetSpec().Vault.Server == "" && issuer.GetSpec().Vault.Path != "" {
++			msg = messageServerRequired
++		} else if issuer.GetSpec().Vault.Server != "" && issuer.GetSpec().Vault.Path == "" {
++			msg = messagePathRequired
++		}
++		logf.FromContext(ctx).V(logf.WarnLevel).Info(msg, "issuer", klog.KObj(issuer))
++		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, msg)
+ 		return nil
+ 	}
+ 
+diff --git a/pkg/issuer/vault/setup_test.go b/pkg/issuer/vault/setup_test.go
+index 6d84bdbf5..df4777b22 100644
+--- a/pkg/issuer/vault/setup_test.go
++++ b/pkg/issuer/vault/setup_test.go
+@@ -78,7 +78,7 @@ func TestVault_Setup(t *testing.T) {
+ 					Server: "https://vault.example.com",
+ 				},
+ 			},
+-			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
++			expectCond:    "Ready False: VaultError: Vault path is a required field",
+ 			webhookReject: true,
+ 		},
+ 		{
+@@ -88,6 +88,14 @@ func TestVault_Setup(t *testing.T) {
+ 					Path: "pki_int",
+ 				},
+ 			},
++			expectCond:    "Ready False: VaultError: Vault server is a required field",
++			webhookReject: true,
++		},
++		{
++			name: "both server and path are missing",
++			givenIssuer: v1.IssuerConfig{
++				Vault: &v1.VaultIssuer{},
++			},
+ 			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
+ 			webhookReject: true,
+ 		},

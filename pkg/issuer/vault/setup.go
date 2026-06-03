@@ -38,6 +38,8 @@ const (
 	messageVaultClientInitFailed             = "Failed to initialize Vault client"
 	messageVaultInitializedAndUnsealedFailed = "Failed to verify Vault is initialized and unsealed"
 	messageVaultConfigRequired               = "Vault config cannot be empty"
+	messageServerRequired                    = "Vault server is a required field"
+	messagePathRequired                      = "Vault path is a required field"
 	messageServerAndPathRequired             = "Vault server and path are required fields"
 	messageAuthFieldsRequired                = "Vault tokenSecretRef, appRole, clientCertificate, kubernetes, or aws is required"
 	messageMultipleAuthFieldsSet             = "Multiple auth methods cannot be set on the same Vault issuer"
@@ -59,10 +61,15 @@ func (v *Vault) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
 	}
 
 	// check if Vault server info is specified.
-	if issuer.GetSpec().Vault.Server == "" ||
-		issuer.GetSpec().Vault.Path == "" {
-		logf.FromContext(ctx).V(logf.WarnLevel).Info(messageServerAndPathRequired, "issuer", klog.KObj(issuer))
-		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messageServerAndPathRequired)
+	if issuer.GetSpec().Vault.Server == "" || issuer.GetSpec().Vault.Path == "" {
+		msg := messageServerAndPathRequired
+		if issuer.GetSpec().Vault.Server == "" && issuer.GetSpec().Vault.Path != "" {
+			msg = messageServerRequired
+		} else if issuer.GetSpec().Vault.Server != "" && issuer.GetSpec().Vault.Path == "" {
+			msg = messagePathRequired
+		}
+		logf.FromContext(ctx).V(logf.WarnLevel).Info(msg, "issuer", klog.KObj(issuer))
+		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, msg)
 		return nil
 	}
 

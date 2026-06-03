@@ -78,7 +78,7 @@ func TestVault_Setup(t *testing.T) {
 					Server: "https://vault.example.com",
 				},
 			},
-			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
+			expectCond:    "Ready False: VaultError: Vault path is a required field",
 			webhookReject: true,
 		},
 		{
@@ -87,6 +87,14 @@ func TestVault_Setup(t *testing.T) {
 				Vault: &v1.VaultIssuer{
 					Path: "pki_int",
 				},
+			},
+			expectCond:    "Ready False: VaultError: Vault server is a required field",
+			webhookReject: true,
+		},
+		{
+			name: "both server and path are missing",
+			givenIssuer: v1.IssuerConfig{
+				Vault: &v1.VaultIssuer{},
 			},
 			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
 			webhookReject: true,

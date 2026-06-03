@@ -60,7 +60,7 @@ const (
 
 	messageAccountRegistrationFailed     = "Failed to register ACME account: "
 	messageAccountVerificationFailed     = "Failed to verify ACME account: "
-	messageAccountUpdateFailed           = "Failed to update ACME account:"
+	messageAccountUpdateFailed           = "Failed to update ACME account: "
 	messageAccountRegistered             = "The ACME account was registered with the ACME server"
 	messageAccountVerified               = "The ACME account was verified with the ACME server"
 	messageNoSecretKeyGenerationDisabled = "the ACME issuer config has 'disableAccountKeyGeneration' set to true, but the secret was not found: "
