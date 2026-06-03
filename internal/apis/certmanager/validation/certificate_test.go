@@ -1011,7 +1011,7 @@ func TestValidateDuration(t *testing.T) {
 					IssuerRef:   validIssuerRef,
 				},
 			},
-			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", cmapi.DefaultCertificateDuration, usefulDurations["ten years"].Duration))},
+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate renewBefore must be less than duration, but duration is %s and renewBefore is %s", cmapi.DefaultCertificateDuration, usefulDurations["ten years"].Duration))},
 		},
 		"renewBefore is bigger than the duration": {
 			cfg: &internalcmapi.Certificate{
@@ -1023,7 +1023,7 @@ func TestValidateDuration(t *testing.T) {
 					IssuerRef:   validIssuerRef,
 				},
 			},
-			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", usefulDurations["one month"].Duration, usefulDurations["one year"].Duration))},
+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate renewBefore must be less than duration, but duration is %s and renewBefore is %s", usefulDurations["one month"].Duration, usefulDurations["one year"].Duration))},
 		},
 		"renewBefore is less than the minimum permitted value": {
 			cfg: &internalcmapi.Certificate{
@@ -1034,7 +1034,7 @@ func TestValidateDuration(t *testing.T) {
 					IssuerRef:   validIssuerRef,
 				},
 			},
-			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore))},
+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore must be at least %s, got %s", cmapi.MinimumRenewBefore, usefulDurations["one second"].Duration))},
 		},
 		"renewBefore and renewBeforePercentage both set": {
 			cfg: &internalcmapi.Certificate{
@@ -1081,7 +1081,7 @@ func TestValidateDuration(t *testing.T) {
 					IssuerRef:             validIssuerRef,
 				},
 			},
-			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), "certificate renewBeforePercentage must result in a renewBefore less than duration")},
+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore less than duration, but duration is %s and computed renewBefore is %s (percentage: %d%%)", cmapi.DefaultCertificateDuration, cmapi.DefaultCertificateDuration, int32(0)))},
 		},
 		"renewBeforePercentage results in less than the minimum permitted value": {
 			cfg: &internalcmapi.Certificate{
@@ -1092,7 +1092,7 @@ func TestValidateDuration(t *testing.T) {
 					IssuerRef:             validIssuerRef,
 				},
 			},
-			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(100), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore greater than %s", cmapi.MinimumRenewBefore))},
+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(100), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore of at least %s, but computed renewBefore is %s (percentage: %d%%)", cmapi.MinimumRenewBefore, time.Duration(0), int32(100)))},
 		},
 		"duration is less than the minimum permitted value": {
 			cfg: &internalcmapi.Certificate{
@@ -1104,7 +1104,7 @@ func TestValidateDuration(t *testing.T) {
 					IssuerRef:   validIssuerRef,
 				},
 			},
-			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration))},
+			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be at least %s, got %s", cmapi.MinimumCertificateDuration, usefulDurations["half hour"].Duration))},
 		},
 	}
 	for n, s := range scenarios {
