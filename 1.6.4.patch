@@ -1,3 +1,78 @@
+diff --git a/1.6.4.patch b/1.6.4.patch
+new file mode 100644
+index 000000000..75a0ca016
+--- /dev/null
++++ b/1.6.4.patch
+@@ -0,0 +1,69 @@
++diff --git a/pkg/issuer/ca/setup.go b/pkg/issuer/ca/setup.go
++index 70bd0df12..2dc98c419 100644
++--- a/pkg/issuer/ca/setup.go
+++++ b/pkg/issuer/ca/setup.go
++@@ -65,7 +65,7 @@ func (c *CA) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
++ 
++ 	log = logf.WithRelatedResourceName(log, issuer.GetSpec().CA.SecretName, resourceNamespace, "Secret")
++ 	if !cert.IsCA {
++-		s := messageErrorGetKeyPair + "certificate is not a CA"
+++		s := messageErrorGetKeyPair + "certificate in Secret \"" + resourceNamespace + "/" + issuer.GetSpec().CA.SecretName + "\" is not a CA"
++ 		log.Error(nil, "signing certificate is not a CA")
++ 		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorInvalidKeyPair, s)
++ 		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorInvalidKeyPair, s)
++diff --git a/pkg/issuer/vault/setup.go b/pkg/issuer/vault/setup.go
++index cb429f8a2..1e361a187 100644
++--- a/pkg/issuer/vault/setup.go
+++++ b/pkg/issuer/vault/setup.go
++@@ -38,7 +38,8 @@ const (
++ 	messageVaultClientInitFailed             = "Failed to initialize Vault client"
++ 	messageVaultInitializedAndUnsealedFailed = "Failed to verify Vault is initialized and unsealed"
++ 	messageVaultConfigRequired               = "Vault config cannot be empty"
++-	messageServerAndPathRequired             = "Vault server and path are required fields"
+++	messageServerRequired                    = "Vault server is a required field"
+++	messagePathRequired                      = "Vault path is a required field"
++ 	messageAuthFieldsRequired                = "Vault tokenSecretRef, appRole, clientCertificate, kubernetes, or aws is required"
++ 	messageMultipleAuthFieldsSet             = "Multiple auth methods cannot be set on the same Vault issuer"
++ 
++@@ -59,10 +60,15 @@ func (v *Vault) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
++ 	}
++ 
++ 	// check if Vault server info is specified.
++-	if issuer.GetSpec().Vault.Server == "" ||
++-		issuer.GetSpec().Vault.Path == "" {
++-		logf.FromContext(ctx).V(logf.WarnLevel).Info(messageServerAndPathRequired, "issuer", klog.KObj(issuer))
++-		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messageServerAndPathRequired)
+++	if issuer.GetSpec().Vault.Server == "" {
+++		logf.FromContext(ctx).V(logf.WarnLevel).Info(messageServerRequired, "issuer", klog.KObj(issuer))
+++		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messageServerRequired)
+++		return nil
+++	}
+++
+++	if issuer.GetSpec().Vault.Path == "" {
+++		logf.FromContext(ctx).V(logf.WarnLevel).Info(messagePathRequired, "issuer", klog.KObj(issuer))
+++		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messagePathRequired)
++ 		return nil
++ 	}
++ 
++diff --git a/pkg/issuer/vault/setup_test.go b/pkg/issuer/vault/setup_test.go
++index 6d84bdbf5..7d4054e32 100644
++--- a/pkg/issuer/vault/setup_test.go
+++++ b/pkg/issuer/vault/setup_test.go
++@@ -78,7 +78,7 @@ func TestVault_Setup(t *testing.T) {
++ 					Server: "https://vault.example.com",
++ 				},
++ 			},
++-			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
+++			expectCond:    "Ready False: VaultError: Vault path is a required field",
++ 			webhookReject: true,
++ 		},
++ 		{
++@@ -88,7 +88,7 @@ func TestVault_Setup(t *testing.T) {
++ 					Path: "pki_int",
++ 				},
++ 			},
++-			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
+++			expectCond:    "Ready False: VaultError: Vault server is a required field",
++ 			webhookReject: true,
++ 		},
++ 		{
 diff --git a/pkg/issuer/ca/setup.go b/pkg/issuer/ca/setup.go
 index 70bd0df12..2dc98c419 100644
 --- a/pkg/issuer/ca/setup.go
@@ -11,6 +86,256 @@ index 70bd0df12..2dc98c419 100644
  		log.Error(nil, "signing certificate is not a CA")
  		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorInvalidKeyPair, s)
  		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorInvalidKeyPair, s)
+diff --git a/pkg/issuer/ca/setup_test.go b/pkg/issuer/ca/setup_test.go
+new file mode 100644
+index 000000000..263071f35
+--- /dev/null
++++ b/pkg/issuer/ca/setup_test.go
+@@ -0,0 +1,243 @@
++/*
++Copyright 2024 The cert-manager Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package ca
++
++import (
++	"crypto/rand"
++	"crypto/rsa"
++	"crypto/x509"
++	"crypto/x509/pkix"
++	"fmt"
++	"math/big"
++	"testing"
++	"time"
++
++	corev1 "k8s.io/api/core/v1"
++	apierrors "k8s.io/apimachinery/pkg/api/errors"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	corelisters "k8s.io/client-go/listers/core/v1"
++
++	v1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	"github.com/cert-manager/cert-manager/pkg/controller"
++	controllertest "github.com/cert-manager/cert-manager/pkg/controller/test"
++	"github.com/cert-manager/cert-manager/pkg/util/pki"
++	testlisters "github.com/cert-manager/cert-manager/test/unit/listers"
++)
++
++func TestCA_Setup(t *testing.T) {
++	caPk, err := pki.GenerateRSAPrivateKey(pki.MinRSAKeySize)
++	if err != nil {
++		t.Fatal(err)
++	}
++	caCert := mustCreateCACertificate(t, caPk, "test-ca")
++
++	nonCAPk, err := pki.GenerateRSAPrivateKey(pki.MinRSAKeySize)
++	if err != nil {
++		t.Fatal(err)
++	}
++	nonCACert := mustCreateNonCACertificate(t, nonCAPk, caCert, caPk)
++
++	secretName := "ca-secret"
++	namespace := "test-namespace"
++
++	caSecret := &corev1.Secret{
++		ObjectMeta: metav1.ObjectMeta{
++			Name:      secretName,
++			Namespace: namespace,
++		},
++		Data: map[string][]byte{
++			corev1.TLSCertKey:       caCert.Raw,
++			corev1.TLSPrivateKeyKey: x509.MarshalPKCS1PrivateKey(caPk),
++		},
++	}
++
++	nonCASecret := &corev1.Secret{
++		ObjectMeta: metav1.ObjectMeta{
++			Name:      secretName,
++			Namespace: namespace,
++		},
++		Data: map[string][]byte{
++			corev1.TLSCertKey:       nonCACert.Raw,
++			corev1.TLSPrivateKeyKey: x509.MarshalPKCS1PrivateKey(nonCAPk),
++		},
++	}
++
++	notFoundErr := apierrors.NewNotFound(corev1.Resource("secret"), secretName)
++
++	tests := map[string]struct {
++		secret         *corev1.Secret
++		secretGetErr   error
++		expectCond     string
++		expectEvent    string
++		expectErr      bool
++		expectErrMatch string
++	}{
++		"secret not found should return error with underlying error in condition": {
++			secretGetErr:   notFoundErr,
++			expectCond:     "Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: " + notFoundErr.Error(),
++			expectEvent:    "Warning ErrGetKeyPair Error getting keypair for CA issuer: " + notFoundErr.Error(),
++			expectErr:      true,
++			expectErrMatch: notFoundErr.Error(),
++		},
++		"secret exists but certificate is not a CA should include secret name in condition": {
++			secret: nonCASecret,
++			expectCond: "Ready False: ErrInvalidKeyPair: Error getting keypair for CA issuer: " +
++				"certificate in Secret \"" + namespace + "/" + secretName + "\" is not a CA",
++			expectEvent: "Warning ErrInvalidKeyPair Error getting keypair for CA issuer: " +
++				"certificate in Secret \"" + namespace + "/" + secretName + "\" is not a CA",
++		},
++		"valid CA secret should be ready": {
++			secret:      caSecret,
++			expectCond:  "Ready True: KeyPairVerified: Signing CA verified",
++			expectEvent: "Normal KeyPairVerified Signing CA verified",
++		},
++	}
++
++	for name, test := range tests {
++		t.Run(name, func(t *testing.T) {
++			issuer := &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: namespace,
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: secretName,
++						},
++					},
++				},
++			}
++			recorder := new(controllertest.FakeRecorder)
++
++			c := &CA{
++				Context: &controller.Context{
++					Recorder: recorder,
++				},
++				secretsLister: &testlisters.FakeSecretLister{
++					SecretsFn: func(ns string) corelisters.SecretNamespaceLister {
++						return &testlisters.FakeSecretNamespaceLister{
++							GetFn: func(name string) (ret *corev1.Secret, err error) {
++								if test.secretGetErr != nil {
++									return nil, test.secretGetErr
++								}
++								return test.secret, nil
++							},
++						}
++					},
++				},
++			}
++
++			err := c.Setup(t.Context(), issuer)
++			if test.expectErr {
++				if err == nil {
++					t.Error("expected error but got nil")
++				} else if test.expectErrMatch != "" && !containsString(err.Error(), test.expectErrMatch) {
++					t.Errorf("expected error to contain %q, got %q", test.expectErrMatch, err.Error())
++				}
++			} else {
++				if err != nil {
++					t.Errorf("unexpected error: %v", err)
++				}
++			}
++
++			if test.expectCond != "" {
++				if len(issuer.Status.Conditions) != 1 {
++					t.Fatalf("expected 1 condition, got %d", len(issuer.Status.Conditions))
++				}
++				gotCond := fmt.Sprintf("%s %s: %s: %s",
++					issuer.Status.Conditions[0].Type,
++					issuer.Status.Conditions[0].Status,
++					issuer.Status.Conditions[0].Reason,
++					issuer.Status.Conditions[0].Message)
++				if gotCond != test.expectCond {
++					t.Errorf("unexpected condition:\n  got: %q\n want: %q", gotCond, test.expectCond)
++				}
++			}
++
++			if test.expectEvent != "" {
++				if len(recorder.Events) != 1 {
++					t.Fatalf("expected 1 event, got %d: %v", len(recorder.Events), recorder.Events)
++				}
++				if recorder.Events[0] != test.expectEvent {
++					t.Errorf("unexpected event:\n  got: %q\n want: %q", recorder.Events[0], test.expectEvent)
++				}
++			}
++		})
++	}
++}
++
++func mustCreateCACertificate(t *testing.T, pk *rsa.PrivateKey, commonName string) *x509.Certificate {
++	t.Helper()
++	template := &x509.Certificate{
++		SerialNumber: big.NewInt(1),
++		Subject: pkix.Name{
++			CommonName: commonName,
++		},
++		NotBefore:             time.Now(),
++		NotAfter:              time.Now().Add(time.Hour),
++		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
++		BasicConstraintsValid: true,
++		IsCA:                  true,
++	}
++	certDER, err := x509.CreateCertificate(rand.Reader, template, template, pk.Public(), pk)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cert, err := x509.ParseCertificate(certDER)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return cert
++}
++
++func mustCreateNonCACertificate(t *testing.T, pk *rsa.PrivateKey, caCert *x509.Certificate, caPk *rsa.PrivateKey) *x509.Certificate {
++	t.Helper()
++	template := &x509.Certificate{
++		SerialNumber: big.NewInt(2),
++		Subject: pkix.Name{
++			CommonName: "test-non-ca",
++		},
++		NotBefore:             time.Now(),
++		NotAfter:              time.Now().Add(time.Hour),
++		KeyUsage:              x509.KeyUsageDigitalSignature,
++		BasicConstraintsValid: true,
++		IsCA:                  false,
++	}
++	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, pk.Public(), caPk)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cert, err := x509.ParseCertificate(certDER)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return cert
++}
++
++func containsString(s, substr string) bool {
++	return len(s) >= len(substr) && searchString(s, substr)
++}
++
++func searchString(s, substr string) bool {
++	for i := 0; i <= len(s)-len(substr); i++ {
++		if s[i:i+len(substr)] == substr {
++			return true
++		}
++	}
++	return false
++}
+\ No newline at end of file
 diff --git a/pkg/issuer/vault/setup.go b/pkg/issuer/vault/setup.go
 index cb429f8a2..1e361a187 100644
 --- a/pkg/issuer/vault/setup.go
