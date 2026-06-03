@@ -1,0 +1,48 @@
+diff --git a/pkg/controller/clusterissuers/sync.go b/pkg/controller/clusterissuers/sync.go
+index 05578d398..064b36cf1 100644
+--- a/pkg/controller/clusterissuers/sync.go
++++ b/pkg/controller/clusterissuers/sync.go
+@@ -27,6 +27,8 @@ import (
+ 	"github.com/cert-manager/cert-manager/internal/controller/feature"
+ 	internalissuers "github.com/cert-manager/cert-manager/internal/controller/issuers"
+ 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++	apiutil "github.com/cert-manager/cert-manager/pkg/api/util"
+ 	"github.com/cert-manager/cert-manager/pkg/controller/globals"
+ 	logf "github.com/cert-manager/cert-manager/pkg/logs"
+ 	utilfeature "github.com/cert-manager/cert-manager/pkg/util/feature"
+@@ -53,6 +55,10 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.ClusterIssuer) (err er
+ 
+ 	i, err := c.issuerFactory.IssuerFor(issuerCopy)
+ 	if err != nil {
++		s := messageErrorInitIssuer + err.Error()
++		log.Error(err, "error setting up issuer")
++		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
++		apiutil.SetIssuerCondition(issuerCopy, issuerCopy.Generation, cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
+ 		return err
+ 	}
+ 
+diff --git a/pkg/controller/issuers/sync.go b/pkg/controller/issuers/sync.go
+index c8f79dcc0..26ed18234 100644
+--- a/pkg/controller/issuers/sync.go
++++ b/pkg/controller/issuers/sync.go
+@@ -27,6 +27,8 @@ import (
+ 	"github.com/cert-manager/cert-manager/internal/controller/feature"
+ 	internalissuers "github.com/cert-manager/cert-manager/internal/controller/issuers"
+ 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++	apiutil "github.com/cert-manager/cert-manager/pkg/api/util"
+ 	"github.com/cert-manager/cert-manager/pkg/controller/globals"
+ 	logf "github.com/cert-manager/cert-manager/pkg/logs"
+ 	utilfeature "github.com/cert-manager/cert-manager/pkg/util/feature"
+@@ -53,6 +55,10 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.Issuer) (err error) {
+ 
+ 	i, err := c.issuerFactory.IssuerFor(issuerCopy)
+ 	if err != nil {
++		s := messageErrorInitIssuer + err.Error()
++		log.V(logf.WarnLevel).Info(s)
++		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
++		apiutil.SetIssuerCondition(issuerCopy, issuerCopy.Generation, cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
+ 		return err
+ 	}
+ 

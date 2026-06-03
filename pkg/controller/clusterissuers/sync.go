@@ -27,6 +27,8 @@ import (
 	"github.com/cert-manager/cert-manager/internal/controller/feature"
 	internalissuers "github.com/cert-manager/cert-manager/internal/controller/issuers"
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	apiutil "github.com/cert-manager/cert-manager/pkg/api/util"
 	"github.com/cert-manager/cert-manager/pkg/controller/globals"
 	logf "github.com/cert-manager/cert-manager/pkg/logs"
 	utilfeature "github.com/cert-manager/cert-manager/pkg/util/feature"
@@ -53,6 +55,10 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.ClusterIssuer) (err er
 
 	i, err := c.issuerFactory.IssuerFor(issuerCopy)
 	if err != nil {
+		s := messageErrorInitIssuer + err.Error()
+		log.Error(err, "error setting up issuer")
+		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
+		apiutil.SetIssuerCondition(issuerCopy, issuerCopy.Generation, cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
 		return err
 	}
 
