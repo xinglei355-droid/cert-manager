@@ -1,0 +1,160 @@
+diff --git a/make/README.md b/make/README.md
+index c0df6e2a7..6a9b0c6df 100644
+--- a/make/README.md
++++ b/make/README.md
+@@ -112,3 +112,78 @@ Some tools must be installed locally, however. The build system will alert you i
+ tool cannot be found, and these tools are documented [on the website](https://cert-manager.io/docs/contributing/building/#prerequisites).
+ 
+ Specifically, note that you can choose to use your system version of Go or to [download a vendored copy](https://cert-manager.io/docs/contributing/building/#go-versions).
++
++## Running Tests
++
++### Quick Reference
++
++| Goal | Command | Requires integration deps? |
++|------|---------|---------------------------|
++| All unit + integration tests | `make test` | Yes (etcd, kube-apiserver, kubectl) |
++| All unit + integration (verbose) | `make test-pretty` | Yes |
++| All unit tests only | `make unit-test` | No |
++| Single package unit tests | `make unit-test-what UNIT_WHAT=./pkg/controller/...` | No |
++| Single package (verbose) | `make unit-test-what UNIT_WHAT=./pkg/controller/certificates/trigger/...` | No |
++| Integration tests only | `make integration-test` | Yes |
++| Controller binary module tests | `make unit-test-controller` | No |
++
++### Running Single-Package Unit Tests
++
++The recommended way to run unit tests for a specific package is using the
++`unit-test-what` target. This target only requires `gotestsum` (auto-downloaded)
++and does **not** require integration test dependencies such as etcd or
++kube-apiserver:
++
++```console
++# Run all tests in pkg/controller
++make unit-test-what UNIT_WHAT=./pkg/controller/...
++
++# Run tests for a specific sub-package
++make unit-test-what UNIT_WHAT=./pkg/controller/certificates/trigger/...
++
++# Run tests for internal packages
++make unit-test-what UNIT_WHAT=./internal/...
++```
++
++You can also use `go test` directly if you have Go installed:
++
++```console
++# From the repository root (core module)
++go test ./pkg/controller/...
++
++# With verbose output
++go test -v ./pkg/controller/certificates/trigger/...
++```
++
++### Multi-Module Testing
++
++cert-manager uses multiple Go modules. The core module (`github.com/cert-manager/cert-manager`)
++covers `./pkg/...`, `./internal/...`, and `./test/...`. Secondary modules exist
++for each binary under `./cmd/`:
++
++- `cmd/controller` — controller binary
++- `cmd/webhook` — webhook binary
++- `cmd/cainjector` — CA injector binary
++- `cmd/acmesolver` — ACME solver binary
++- `cmd/startupapicheck` — startup API check binary
++
++**Important:** `go test ./...` from the repository root will NOT recurse into
++secondary modules. To test secondary modules, either use the provided make
++targets or `cd` into the module directory:
++
++```console
++# Using make (recommended)
++make unit-test-controller
++
++# Using go test directly
++cd cmd/controller && go test ./...
++```
++
++### Integration Tests
++
++Integration tests require etcd and kube-apiserver binaries, which are
++auto-downloaded by the make targets. To run integration tests:
++
++```console
++make integration-test
++```
+diff --git a/make/test.mk b/make/test.mk
+index f9fb74615..e1063f941 100644
+--- a/make/test.mk
++++ b/make/test.mk
+@@ -17,11 +17,17 @@ export KUBEBUILDER_ASSETS=$(PWD)/$(bin_dir)/tools
+ # GOTESTSUM_CI_FLAGS contains flags which are common to invocations of gotestsum in CI environments
+ GOTESTSUM_CI_FLAGS := --junitfile-testsuite-name short --junitfile-testcase-classname relative
+ 
+-# WHAT can be used to control which unit tests are run by "make test"; defaults to running all
+-# tests except e2e tests (which require more significant setup)
+-# For example: make WHAT=./pkg/util/pki test-pretty to only run the PKI utils tests
++# WHAT can be used to control which tests are run by "make test" and
++# "make test-pretty"; defaults to running all tests except e2e tests
++# (which require more significant setup).
++# For example: make WHAT=./pkg/util/pki test-pretty
+ WHAT ?= ./pkg/... ./internal/... ./test/... ./hack/prune-junit-xml/...
+ 
++# UNIT_WHAT can be used to control which unit tests are run by
++# "make unit-test-what"; defaults to core module packages only.
++# For example: make UNIT_WHAT=./pkg/controller/... unit-test-what
++UNIT_WHAT ?= ./pkg/... ./internal/...
++
+ .PHONY: test
+ ## Test is the workhorse test command which by default runs all unit and
+ ## integration tests. Configured through WHAT, e.g.:
+@@ -37,6 +43,20 @@ WHAT ?= ./pkg/... ./internal/... ./test/... ./hack/prune-junit-xml/...
+ test: setup-integration-tests | $(NEEDS_GOTESTSUM) $(NEEDS_ETCD) $(NEEDS_KUBECTL) $(NEEDS_KUBE-APISERVER) $(NEEDS_GO)
+ 	$(GOTESTSUM) -- $(WHAT)
+ 
++.PHONY: test-pretty
++## Same as `test` but with verbose, human-readable output. Configured through
++## WHAT, e.g.:
++##
++##   make test-pretty WHAT=./pkg/controller/...
++##
++## Note: This target still requires integration test dependencies (etcd,
++## kube-apiserver, kubectl) because WHAT defaults to include ./test/...
++## If you only want to run unit tests, use "make unit-test-what" instead.
++##
++## @category Development
++test-pretty: setup-integration-tests | $(NEEDS_GOTESTSUM) $(NEEDS_ETCD) $(NEEDS_KUBECTL) $(NEEDS_KUBE-APISERVER) $(NEEDS_GO)
++	$(GOTESTSUM) --format testname -- $(WHAT)
++
+ .PHONY: test-ci
+ ## test-ci runs all unit and integration tests and writes JUnit reports of
+ ## the results.
+@@ -93,6 +113,30 @@ unit-test-webhook: | $(NEEDS_GOTESTSUM)
+ unit-test-thirdparty: | $(NEEDS_GOTESTSUM)
+ 	$(GOTESTSUM) ./third_party/...
+ 
++.PHONY: unit-test-what
++## Run unit tests for specific packages in the core module, without requiring
++## integration test dependencies (etcd, kube-apiserver, kubectl). This is the
++## recommended target for running single-package unit tests locally.
++## Configured through UNIT_WHAT, e.g.:
++##
++##   make unit-test-what UNIT_WHAT=./pkg/controller/...
++##   make unit-test-what UNIT_WHAT=./pkg/controller/certificates/trigger/...
++##   make unit-test-what UNIT_WHAT=./internal/...
++##
++## Note: This only tests packages in the core module. For secondary modules
++## (cmd/controller, cmd/webhook, etc.), use the module-specific targets:
++##
++##   make unit-test-controller
++##   make unit-test-webhook
++##
++## Or run go test directly from the module directory:
++##
++##   cd cmd/controller && go test ./...
++##
++## @category Development
++unit-test-what: | $(NEEDS_GOTESTSUM)
++	$(GOTESTSUM) $(UNIT_WHAT)
++
+ .PHONY: update-config-api-defaults
+ update-config-api-defaults: | $(NEEDS_GO)
+ 	cd internal/apis/config/cainjector/v1alpha1/ && UPDATE_DEFAULTS=true $(GO) test . && echo "cainjector config api defaults updated"

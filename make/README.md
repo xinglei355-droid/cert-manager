@@ -112,3 +112,78 @@ Some tools must be installed locally, however. The build system will alert you i
 tool cannot be found, and these tools are documented [on the website](https://cert-manager.io/docs/contributing/building/#prerequisites).
 
 Specifically, note that you can choose to use your system version of Go or to [download a vendored copy](https://cert-manager.io/docs/contributing/building/#go-versions).
+
+## Running Tests
+
+### Quick Reference
+
+| Goal | Command | Requires integration deps? |
+|------|---------|---------------------------|
+| All unit + integration tests | `make test` | Yes (etcd, kube-apiserver, kubectl) |
+| All unit + integration (verbose) | `make test-pretty` | Yes |
+| All unit tests only | `make unit-test` | No |
+| Single package unit tests | `make unit-test-what UNIT_WHAT=./pkg/controller/...` | No |
+| Single package (verbose) | `make unit-test-what UNIT_WHAT=./pkg/controller/certificates/trigger/...` | No |
+| Integration tests only | `make integration-test` | Yes |
+| Controller binary module tests | `make unit-test-controller` | No |
+
+### Running Single-Package Unit Tests
+
+The recommended way to run unit tests for a specific package is using the
+`unit-test-what` target. This target only requires `gotestsum` (auto-downloaded)
+and does **not** require integration test dependencies such as etcd or
+kube-apiserver:
+
+```console
+# Run all tests in pkg/controller
+make unit-test-what UNIT_WHAT=./pkg/controller/...
+
+# Run tests for a specific sub-package
+make unit-test-what UNIT_WHAT=./pkg/controller/certificates/trigger/...
+
+# Run tests for internal packages
+make unit-test-what UNIT_WHAT=./internal/...
+```
+
+You can also use `go test` directly if you have Go installed:
+
+```console
+# From the repository root (core module)
+go test ./pkg/controller/...
+
+# With verbose output
+go test -v ./pkg/controller/certificates/trigger/...
+```
+
+### Multi-Module Testing
+
+cert-manager uses multiple Go modules. The core module (`github.com/cert-manager/cert-manager`)
+covers `./pkg/...`, `./internal/...`, and `./test/...`. Secondary modules exist
+for each binary under `./cmd/`:
+
+- `cmd/controller` — controller binary
+- `cmd/webhook` — webhook binary
+- `cmd/cainjector` — CA injector binary
+- `cmd/acmesolver` — ACME solver binary
+- `cmd/startupapicheck` — startup API check binary
+
+**Important:** `go test ./...` from the repository root will NOT recurse into
+secondary modules. To test secondary modules, either use the provided make
+targets or `cd` into the module directory:
+
+```console
+# Using make (recommended)
+make unit-test-controller
+
+# Using go test directly
+cd cmd/controller && go test ./...
+```
+
+### Integration Tests
+
+Integration tests require etcd and kube-apiserver binaries, which are
+auto-downloaded by the make targets. To run integration tests:
+
+```console
+make integration-test
+```

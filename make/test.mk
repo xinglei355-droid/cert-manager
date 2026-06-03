@@ -17,10 +17,16 @@ export KUBEBUILDER_ASSETS=$(PWD)/$(bin_dir)/tools
 # GOTESTSUM_CI_FLAGS contains flags which are common to invocations of gotestsum in CI environments
 GOTESTSUM_CI_FLAGS := --junitfile-testsuite-name short --junitfile-testcase-classname relative
 
-# WHAT can be used to control which unit tests are run by "make test"; defaults to running all
-# tests except e2e tests (which require more significant setup)
-# For example: make WHAT=./pkg/util/pki test-pretty to only run the PKI utils tests
+# WHAT can be used to control which tests are run by "make test" and
+# "make test-pretty"; defaults to running all tests except e2e tests
+# (which require more significant setup).
+# For example: make WHAT=./pkg/util/pki test-pretty
 WHAT ?= ./pkg/... ./internal/... ./test/... ./hack/prune-junit-xml/...
+
+# UNIT_WHAT can be used to control which unit tests are run by
+# "make unit-test-what"; defaults to core module packages only.
+# For example: make UNIT_WHAT=./pkg/controller/... unit-test-what
+UNIT_WHAT ?= ./pkg/... ./internal/...
 
 .PHONY: test
 ## Test is the workhorse test command which by default runs all unit and
@@ -36,6 +42,20 @@ WHAT ?= ./pkg/... ./internal/... ./test/... ./hack/prune-junit-xml/...
 ## @category Development
 test: setup-integration-tests | $(NEEDS_GOTESTSUM) $(NEEDS_ETCD) $(NEEDS_KUBECTL) $(NEEDS_KUBE-APISERVER) $(NEEDS_GO)
 	$(GOTESTSUM) -- $(WHAT)
+
+.PHONY: test-pretty
+## Same as `test` but with verbose, human-readable output. Configured through
+## WHAT, e.g.:
+##
+##   make test-pretty WHAT=./pkg/controller/...
+##
+## Note: This target still requires integration test dependencies (etcd,
+## kube-apiserver, kubectl) because WHAT defaults to include ./test/...
+## If you only want to run unit tests, use "make unit-test-what" instead.
+##
+## @category Development
+test-pretty: setup-integration-tests | $(NEEDS_GOTESTSUM) $(NEEDS_ETCD) $(NEEDS_KUBECTL) $(NEEDS_KUBE-APISERVER) $(NEEDS_GO)
+	$(GOTESTSUM) --format testname -- $(WHAT)
 
 .PHONY: test-ci
 ## test-ci runs all unit and integration tests and writes JUnit reports of
@@ -92,6 +112,30 @@ unit-test-webhook: | $(NEEDS_GOTESTSUM)
 .PHONY: unit-test-thirdparty
 unit-test-thirdparty: | $(NEEDS_GOTESTSUM)
 	$(GOTESTSUM) ./third_party/...
+
+.PHONY: unit-test-what
+## Run unit tests for specific packages in the core module, without requiring
+## integration test dependencies (etcd, kube-apiserver, kubectl). This is the
+## recommended target for running single-package unit tests locally.
+## Configured through UNIT_WHAT, e.g.:
+##
+##   make unit-test-what UNIT_WHAT=./pkg/controller/...
+##   make unit-test-what UNIT_WHAT=./pkg/controller/certificates/trigger/...
+##   make unit-test-what UNIT_WHAT=./internal/...
+##
+## Note: This only tests packages in the core module. For secondary modules
+## (cmd/controller, cmd/webhook, etc.), use the module-specific targets:
+##
+##   make unit-test-controller
+##   make unit-test-webhook
+##
+## Or run go test directly from the module directory:
+##
+##   cd cmd/controller && go test ./...
+##
+## @category Development
+unit-test-what: | $(NEEDS_GOTESTSUM)
+	$(GOTESTSUM) $(UNIT_WHAT)
 
 .PHONY: update-config-api-defaults
 update-config-api-defaults: | $(NEEDS_GO)
