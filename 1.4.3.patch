@@ -1,0 +1,26 @@
+diff --git a/README.md b/README.md
+index 20ad5c0a5..6aee395da 100644
+--- a/README.md
++++ b/README.md
+@@ -52,6 +52,21 @@ website page.
+ Note in particular that macOS has several extra requirements, to ensure that modern tools are installed and available. Read the page before
+ getting started!
+ 
++### Running Tests Locally
++
++When developing locally, especially in Docker or Trae environments, you might want to run tests for a specific package (e.g., a single controller) rather than the entire suite. To do this stably without invoking the full CI test suite, you can use the minimal runnable test command directly with `go test`.
++
++First, ensure the integration test dependencies (`etcd`, `kube-apiserver`, `kubectl`) are downloaded:
++```bash
++make _bin/tools/etcd _bin/tools/kube-apiserver _bin/tools/kubectl
++```
++
++Then, set the `KUBEBUILDER_ASSETS` environment variable to the downloaded tools directory and run `go test` for your desired package. For example, to test the ACME CertificateRequest controller:
++```bash
++export KUBEBUILDER_ASSETS="$(pwd)/_bin/tools"
++go test -v ./pkg/controller/certificaterequests/acme/...
++```
++
+ ## Troubleshooting
+ 
+ If you encounter any issues whilst using cert-manager, we have a number of ways to get help:
