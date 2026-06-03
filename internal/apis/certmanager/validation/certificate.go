@@ -360,22 +360,22 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
 
 	duration := util.DefaultCertDuration(crt.Duration)
 	if duration < cmapi.MinimumCertificateDuration {
-		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)))
+		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("invalid %s: %s, must be greater than or equal to %s", fldPath.Child("duration").String(), duration, cmapi.MinimumCertificateDuration)))
 	}
 
 	// Must set at most one of spec.renewBefore or spec.renewBeforePercentage.
 	if crt.RenewBefore != nil && crt.RenewBeforePercentage != nil {
-		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, "renewBefore and renewBeforePercentage are mutually exclusive and cannot both be set"))
-		el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, "renewBefore and renewBeforePercentage are mutually exclusive and cannot both be set"))
+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("invalid %s: %s, renewBefore and renewBeforePercentage are mutually exclusive and cannot both be set", fldPath.Child("renewBefore").String(), crt.RenewBefore.Duration)))
+		el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("invalid %s: %d, renewBefore and renewBeforePercentage are mutually exclusive and cannot both be set", fldPath.Child("renewBeforePercentage").String(), *crt.RenewBeforePercentage)))
 	}
 
 	// If spec.renewBefore is set, check that it is not less than the minimum.
 	if crt.RenewBefore != nil && crt.RenewBefore.Duration < cmapi.MinimumRenewBefore {
-		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore)))
+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("invalid %s: %s, must be greater than or equal to %s", fldPath.Child("renewBefore").String(), crt.RenewBefore.Duration, cmapi.MinimumRenewBefore)))
 	}
 	// If spec.renewBefore is set, it must be less than the duration.
 	if crt.RenewBefore != nil && crt.RenewBefore.Duration >= duration {
-		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", duration, crt.RenewBefore.Duration)))
+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("invalid %s: %s, must be less than duration %s", fldPath.Child("renewBefore").String(), crt.RenewBefore.Duration, duration)))
 	}
 
 	// If spec.renewBeforePercentage is set, check that it's within the allowed
@@ -383,10 +383,10 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
 	if crt.RenewBeforePercentage != nil {
 		renewBefore := duration * time.Duration(100-*crt.RenewBeforePercentage) / 100
 		if renewBefore < cmapi.MinimumRenewBefore {
-			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore greater than %s", cmapi.MinimumRenewBefore)))
+			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("invalid %s: %d, must result in a renewBefore greater than or equal to %s (current renewBefore: %s)", fldPath.Child("renewBeforePercentage").String(), *crt.RenewBeforePercentage, cmapi.MinimumRenewBefore, renewBefore)))
 		}
 		if renewBefore >= duration {
-			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, "certificate renewBeforePercentage must result in a renewBefore less than duration"))
+			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("invalid %s: %d, must result in a renewBefore less than duration %s (current renewBefore: %s)", fldPath.Child("renewBeforePercentage").String(), *crt.RenewBeforePercentage, duration, renewBefore)))
 		}
 	}
 
