@@ -1,0 +1,157 @@
+diff --git a/internal/apis/certmanager/validation/certificate.go b/internal/apis/certmanager/validation/certificate.go
+index 8a0b9f4f6..fd433028e 100644
+--- a/internal/apis/certmanager/validation/certificate.go
++++ b/internal/apis/certmanager/validation/certificate.go
+@@ -355,31 +355,30 @@ func validateSecretTemplateAnnotations(crt *internalcmapi.CertificateSpec, fldPa
+ 	return el
+ }
+ 
++func formatDurationValidationDetail(fieldName string, value time.Duration, constraint string) string {
++	return fmt.Sprintf("%s value %s is invalid: %s", fieldName, value, constraint)
++}
++
+ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) field.ErrorList {
+ 	el := field.ErrorList{}
+ 
+ 	duration := util.DefaultCertDuration(crt.Duration)
+ 	if duration < cmapi.MinimumCertificateDuration {
+-		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)))
++		el = append(el, field.Invalid(fldPath.Child("duration"), duration, formatDurationValidationDetail("duration", duration, fmt.Sprintf("must be greater than or equal to %s", cmapi.MinimumCertificateDuration))))
+ 	}
+ 
+-	// Must set at most one of spec.renewBefore or spec.renewBeforePercentage.
+ 	if crt.RenewBefore != nil && crt.RenewBeforePercentage != nil {
+-		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, "renewBefore and renewBeforePercentage are mutually exclusive and cannot both be set"))
++		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, formatDurationValidationDetail("renewBefore", crt.RenewBefore.Duration, "must not be set when renewBeforePercentage is set")))
+ 		el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, "renewBefore and renewBeforePercentage are mutually exclusive and cannot both be set"))
+ 	}
+ 
+-	// If spec.renewBefore is set, check that it is not less than the minimum.
+ 	if crt.RenewBefore != nil && crt.RenewBefore.Duration < cmapi.MinimumRenewBefore {
+-		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore)))
++		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, formatDurationValidationDetail("renewBefore", crt.RenewBefore.Duration, fmt.Sprintf("must be greater than or equal to %s", cmapi.MinimumRenewBefore))))
+ 	}
+-	// If spec.renewBefore is set, it must be less than the duration.
+ 	if crt.RenewBefore != nil && crt.RenewBefore.Duration >= duration {
+-		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", duration, crt.RenewBefore.Duration)))
++		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, formatDurationValidationDetail("renewBefore", crt.RenewBefore.Duration, fmt.Sprintf("must be less than duration %s", duration))))
+ 	}
+ 
+-	// If spec.renewBeforePercentage is set, check that it's within the allowed
+-	// range.
+ 	if crt.RenewBeforePercentage != nil {
+ 		renewBefore := duration * time.Duration(100-*crt.RenewBeforePercentage) / 100
+ 		if renewBefore < cmapi.MinimumRenewBefore {
+diff --git a/internal/apis/certmanager/validation/certificate_test.go b/internal/apis/certmanager/validation/certificate_test.go
+index 9064767c1..16e2eee50 100644
+--- a/internal/apis/certmanager/validation/certificate_test.go
++++ b/internal/apis/certmanager/validation/certificate_test.go
+@@ -1011,7 +1011,7 @@ func TestValidateDuration(t *testing.T) {
+ 					IssuerRef:   validIssuerRef,
+ 				},
+ 			},
+-			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", cmapi.DefaultCertificateDuration, usefulDurations["ten years"].Duration))},
++			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("renewBefore value %s is invalid: must be less than duration %s", usefulDurations["ten years"].Duration, cmapi.DefaultCertificateDuration))},
+ 		},
+ 		"renewBefore is bigger than the duration": {
+ 			cfg: &internalcmapi.Certificate{
+@@ -1023,7 +1023,7 @@ func TestValidateDuration(t *testing.T) {
+ 					IssuerRef:   validIssuerRef,
+ 				},
+ 			},
+-			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", usefulDurations["one month"].Duration, usefulDurations["one year"].Duration))},
++			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("renewBefore value %s is invalid: must be less than duration %s", usefulDurations["one year"].Duration, usefulDurations["one month"].Duration))},
+ 		},
+ 		"renewBefore is less than the minimum permitted value": {
+ 			cfg: &internalcmapi.Certificate{
+@@ -1034,7 +1034,7 @@ func TestValidateDuration(t *testing.T) {
+ 					IssuerRef:   validIssuerRef,
+ 				},
+ 			},
+-			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore))},
++			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("renewBefore value %s is invalid: must be greater than or equal to %s", usefulDurations["one second"].Duration, cmapi.MinimumRenewBefore))},
+ 		},
+ 		"renewBefore and renewBeforePercentage both set": {
+ 			cfg: &internalcmapi.Certificate{
+@@ -1047,7 +1047,7 @@ func TestValidateDuration(t *testing.T) {
+ 				},
+ 			},
+ 			errs: []*field.Error{
+-				field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one month"].Duration, "renewBefore and renewBeforePercentage are mutually exclusive and cannot both be set"),
++				field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one month"].Duration, fmt.Sprintf("renewBefore value %s is invalid: must not be set when renewBeforePercentage is set", usefulDurations["one month"].Duration)),
+ 				field.Invalid(fldPath.Child("renewBeforePercentage"), int32(95), "renewBefore and renewBeforePercentage are mutually exclusive and cannot both be set"),
+ 			},
+ 		},
+@@ -1104,7 +1104,7 @@ func TestValidateDuration(t *testing.T) {
+ 					IssuerRef:   validIssuerRef,
+ 				},
+ 			},
+-			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration))},
++			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("duration value %s is invalid: must be greater than or equal to %s", usefulDurations["half hour"].Duration, cmapi.MinimumCertificateDuration))},
+ 		},
+ 	}
+ 	for n, s := range scenarios {
+@@ -1115,6 +1115,63 @@ func TestValidateDuration(t *testing.T) {
+ 	}
+ }
+ 
++func TestValidateDurationErrorMessages(t *testing.T) {
++	usefulDurations := map[string]*metav1.Duration{
++		"one second": {Duration: time.Second},
++		"half hour":  {Duration: time.Minute * 30},
++		"one month":  {Duration: time.Hour * 24 * 30},
++		"one year":   {Duration: time.Hour * 24 * 365},
++	}
++
++	tests := map[string]struct {
++		spec           internalcmapi.CertificateSpec
++		expectedField  string
++		expectedDetail []string
++	}{
++		"invalid duration includes field value and constraint": {
++			spec: internalcmapi.CertificateSpec{
++				Duration:    usefulDurations["half hour"],
++				RenewBefore: usefulDurations["one second"],
++			},
++			expectedField: "spec.duration",
++			expectedDetail: []string{
++				"spec.duration",
++				usefulDurations["half hour"].Duration.String(),
++				"duration value " + usefulDurations["half hour"].Duration.String(),
++				"must be greater than or equal to " + cmapi.MinimumCertificateDuration.String(),
++			},
++		},
++		"invalid renewBefore includes field value and constraint": {
++			spec: internalcmapi.CertificateSpec{
++				Duration:    usefulDurations["one month"],
++				RenewBefore: usefulDurations["one year"],
++			},
++			expectedField: "spec.renewBefore",
++			expectedDetail: []string{
++				"spec.renewBefore",
++				usefulDurations["one year"].Duration.String(),
++				"renewBefore value " + usefulDurations["one year"].Duration.String(),
++				"must be less than duration " + usefulDurations["one month"].Duration.String(),
++			},
++		},
++	}
++
++	for name, test := range tests {
++		t.Run(name, func(t *testing.T) {
++			errs := ValidateDuration(&test.spec, field.NewPath("spec"))
++			if !assert.NotEmpty(t, errs) {
++				return
++			}
++
++			err := errs[0]
++			assert.Equal(t, test.expectedField, err.Field)
++			for _, expected := range test.expectedDetail {
++				assert.Contains(t, err.Error(), expected)
++			}
++		})
++	}
++}
++
+ func Test_validateAdditionalOutputFormats(t *testing.T) {
+ 	tests := map[string]struct {
+ 		spec   *internalcmapi.CertificateSpec
