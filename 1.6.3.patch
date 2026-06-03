@@ -1,3 +1,121 @@
+diff --git a/1.6.3.patch b/1.6.3.patch
+new file mode 100644
+index 000000000..7aedbc29a
+--- /dev/null
++++ b/1.6.3.patch
+@@ -0,0 +1,112 @@
++diff --git a/pkg/controller/clusterissuers/sync.go b/pkg/controller/clusterissuers/sync.go
++index 05578d398..574875c27 100644
++--- a/pkg/controller/clusterissuers/sync.go
+++++ b/pkg/controller/clusterissuers/sync.go
++@@ -26,7 +26,9 @@ import (
++ 
++ 	"github.com/cert-manager/cert-manager/internal/controller/feature"
++ 	internalissuers "github.com/cert-manager/cert-manager/internal/controller/issuers"
+++	apiutil "github.com/cert-manager/cert-manager/pkg/api/util"
++ 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++ 	"github.com/cert-manager/cert-manager/pkg/controller/globals"
++ 	logf "github.com/cert-manager/cert-manager/pkg/logs"
++ 	utilfeature "github.com/cert-manager/cert-manager/pkg/util/feature"
++@@ -53,6 +55,10 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.ClusterIssuer) (err er
++ 
++ 	i, err := c.issuerFactory.IssuerFor(issuerCopy)
++ 	if err != nil {
+++		s := messageErrorInitIssuer + err.Error()
+++		log.Error(err, "error getting issuer")
+++		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
+++		apiutil.SetIssuerCondition(issuerCopy, issuerCopy.GetGeneration(), cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
++ 		return err
++ 	}
++ 
++@@ -61,6 +67,12 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.ClusterIssuer) (err er
++ 		s := messageErrorInitIssuer + err.Error()
++ 		log.Error(err, "error setting up issuer")
++ 		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
+++		if !apiutil.IssuerHasCondition(issuerCopy, cmapi.IssuerCondition{
+++			Type:   cmapi.IssuerConditionReady,
+++			Status: cmmeta.ConditionFalse,
+++		}) {
+++			apiutil.SetIssuerCondition(issuerCopy, issuerCopy.GetGeneration(), cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
+++		}
++ 		return err
++ 	}
++ 
++diff --git a/pkg/controller/issuers/sync.go b/pkg/controller/issuers/sync.go
++index c8f79dcc0..c2874f2d3 100644
++--- a/pkg/controller/issuers/sync.go
+++++ b/pkg/controller/issuers/sync.go
++@@ -26,7 +26,9 @@ import (
++ 
++ 	"github.com/cert-manager/cert-manager/internal/controller/feature"
++ 	internalissuers "github.com/cert-manager/cert-manager/internal/controller/issuers"
+++	apiutil "github.com/cert-manager/cert-manager/pkg/api/util"
++ 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++ 	"github.com/cert-manager/cert-manager/pkg/controller/globals"
++ 	logf "github.com/cert-manager/cert-manager/pkg/logs"
++ 	utilfeature "github.com/cert-manager/cert-manager/pkg/util/feature"
++@@ -53,6 +55,10 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.Issuer) (err error) {
++ 
++ 	i, err := c.issuerFactory.IssuerFor(issuerCopy)
++ 	if err != nil {
+++		s := messageErrorInitIssuer + err.Error()
+++		log.V(logf.WarnLevel).Info(s)
+++		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
+++		apiutil.SetIssuerCondition(issuerCopy, issuerCopy.GetGeneration(), cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
++ 		return err
++ 	}
++ 
++@@ -61,6 +67,12 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.Issuer) (err error) {
++ 		s := messageErrorInitIssuer + err.Error()
++ 		log.V(logf.WarnLevel).Info(s)
++ 		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
+++		if !apiutil.IssuerHasCondition(issuerCopy, cmapi.IssuerCondition{
+++			Type:   cmapi.IssuerConditionReady,
+++			Status: cmmeta.ConditionFalse,
+++		}) {
+++			apiutil.SetIssuerCondition(issuerCopy, issuerCopy.GetGeneration(), cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
+++		}
++ 		return err
++ 	}
++ 
++diff --git a/pkg/issuer/vault/setup_test.go b/pkg/issuer/vault/setup_test.go
++index 6d84bdbf5..2a1042eb9 100644
++--- a/pkg/issuer/vault/setup_test.go
+++++ b/pkg/issuer/vault/setup_test.go
++@@ -385,7 +385,8 @@ func TestVault_Setup(t *testing.T) {
++ 					},
++ 				},
++ 			},
++-			expectErr: "Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
+++			expectErr:  "Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
+++			expectCond: "Ready False: VaultError: Failed to verify Vault is initialized and unsealed: Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
++ 		},
++ 		{
++ 			name: "server with leading whitespace should fail to parse",
++@@ -403,7 +404,8 @@ func TestVault_Setup(t *testing.T) {
++ 					},
++ 				},
++ 			},
++-			expectErr: "error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
+++			expectErr:  "error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
+++			expectCond: "Ready False: VaultError: Failed to initialize Vault client: error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
++ 		},
++ 		{
++ 			name: "valid auth.clientCertificate: All fields can be omitted",
++@@ -460,9 +462,9 @@ func TestVault_Setup(t *testing.T) {
++ 			err := v.Setup(t.Context(), givenIssuer)
++ 			if tt.expectErr != "" {
++ 				assert.EqualError(t, err, tt.expectErr)
++-				return
+++			} else {
+++				assert.NoError(t, err)
++ 			}
++-			assert.NoError(t, err)
++ 
++ 			// The webhook-side validation of the Vault issuer configuration
++ 			// didn't exist for a long time. The only validation that was done
 diff --git a/pkg/controller/clusterissuers/sync.go b/pkg/controller/clusterissuers/sync.go
 index 05578d398..574875c27 100644
 --- a/pkg/controller/clusterissuers/sync.go
@@ -74,6 +192,118 @@ index c8f79dcc0..c2874f2d3 100644
  		return err
  	}
  
+diff --git a/pkg/issuer/ca/setup_test.go b/pkg/issuer/ca/setup_test.go
+new file mode 100644
+index 000000000..3668464fb
+--- /dev/null
++++ b/pkg/issuer/ca/setup_test.go
+@@ -0,0 +1,106 @@
++package ca
++
++import (
++	"context"
++	"fmt"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++	corev1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	corelisters "k8s.io/client-go/listers/core/v1"
++
++	v1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	"github.com/cert-manager/cert-manager/pkg/controller"
++	"github.com/cert-manager/cert-manager/pkg/util/pki"
++	testlisters "github.com/cert-manager/cert-manager/test/unit/listers"
++	controllertest "github.com/cert-manager/cert-manager/pkg/controller/test"
++)
++
++func TestCA_Setup(t *testing.T) {
++	tests := []struct {
++		name       string
++		secretName string
++		secretData map[string][]byte
++		expectErr  string
++		expectCond string
++	}{
++		{
++			name:       "secret not found",
++			secretName: "missing-secret",
++			secretData: nil,
++			expectErr:  "error getting secret missing-secret: secret \"missing-secret\" not found",
++			expectCond: "Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: error getting secret missing-secret: secret \"missing-secret\" not found",
++		},
++		{
++			name:       "secret missing tls.crt",
++			secretName: "bad-secret",
++			secretData: map[string][]byte{
++				"tls.key": []byte("key"),
++			},
++			expectErr:  "error decoding cert: error decoding certificate PEM block",
++			expectCond: "Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: error decoding cert: error decoding certificate PEM block",
++		},
++		{
++			name:       "secret missing tls.key",
++			secretName: "bad-secret-key",
++			secretData: map[string][]byte{
++				"tls.crt": []byte("crt"),
++			},
++			expectErr:  "error decoding cert: error decoding certificate PEM block",
++			expectCond: "Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: error decoding cert: error decoding certificate PEM block",
++		},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			issuer := &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: "test-namespace",
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: tt.secretName,
++						},
++					},
++				},
++			}
++
++			c := &CA{
++				Context: &controller.Context{
++					Recorder: new(controllertest.FakeRecorder),
++				},
++				secretsLister: &testlisters.FakeSecretLister{
++					SecretsFn: func(namespace string) corelisters.SecretNamespaceLister {
++						return &testlisters.FakeSecretNamespaceLister{
++							GetFn: func(name string) (*corev1.Secret, error) {
++								if tt.secretData == nil {
++									return nil, fmt.Errorf("secret %q not found", name)
++								}
++								return &corev1.Secret{
++									ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
++									Data:       tt.secretData,
++								}, nil
++							},
++						}
++					},
++				},
++			}
++
++			err := c.Setup(context.TODO(), issuer)
++			if tt.expectErr != "" {
++				assert.EqualError(t, err, tt.expectErr)
++			} else {
++				assert.NoError(t, err)
++			}
++
++			if tt.expectCond != "" {
++				require.Len(t, issuer.Status.Conditions, 1)
++				assert.Equal(t, tt.expectCond, fmt.Sprintf("%s %s: %s: %s", issuer.Status.Conditions[0].Type, issuer.Status.Conditions[0].Status, issuer.Status.Conditions[0].Reason, issuer.Status.Conditions[0].Message))
++			}
++		})
++	}
++}
 diff --git a/pkg/issuer/vault/setup_test.go b/pkg/issuer/vault/setup_test.go
 index 6d84bdbf5..2a1042eb9 100644
 --- a/pkg/issuer/vault/setup_test.go
