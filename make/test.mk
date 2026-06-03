@@ -93,6 +93,34 @@ unit-test-webhook: | $(NEEDS_GOTESTSUM)
 unit-test-thirdparty: | $(NEEDS_GOTESTSUM)
 	$(GOTESTSUM) ./third_party/...
 
+.PHONY: test-controller-package
+## Run tests for a specific controller package. Use PACKAGE to specify the
+## package path, e.g.:
+##
+##   make test-controller-package PACKAGE=./pkg/controller/certificates/keymanager
+##
+## @category Development
+test-controller-package: | $(NEEDS_GOTESTSUM)
+	@if [ -z "$(PACKAGE)" ]; then \
+		echo "PACKAGE variable must be set, e.g. make test-controller-package PACKAGE=./pkg/controller/certificates/keymanager"; \
+		exit 1; \
+	fi
+	$(GOTESTSUM) $(PACKAGE)
+
+.PHONY: test-module
+## Run tests for a specific Go module. Use MODULE to specify the module
+## directory, e.g.:
+##
+##   make test-module MODULE=./cmd/controller
+##
+## @category Development
+test-module: | $(NEEDS_GOTESTSUM)
+	@if [ -z "$(MODULE)" ]; then \
+		echo "MODULE variable must be set, e.g. make test-module MODULE=./cmd/controller"; \
+		exit 1; \
+	fi
+	cd $(MODULE) && $(GOTESTSUM) ./...
+
 .PHONY: update-config-api-defaults
 update-config-api-defaults: | $(NEEDS_GO)
 	cd internal/apis/config/cainjector/v1alpha1/ && UPDATE_DEFAULTS=true $(GO) test . && echo "cainjector config api defaults updated"
@@ -129,11 +157,11 @@ E2E_OPENSHIFT ?= false
 .PHONY: e2e
 ## Run the end-to-end tests. Before running this, you need to run:
 ##
-##     make -j e2e-setup
+##   make -j e2e-setup
 ##
 ## To run a specific test instead of the whole suite, run:
 ##
-##     make e2e GINKGO_FOCUS='.*call the dummy webhook'
+##   make e2e GINKGO_FOCUS='.*call the dummy webhook'
 ##
 ## For more information about GINKGO_FOCUS, see "make/e2e.sh --help".
 ##

@@ -25,6 +25,29 @@ cert-manager adds certificates and certificate issuers as resource types in Kube
 
 It supports issuing certificates from a variety of sources, including Let's Encrypt (ACME), HashiCorp Vault, and CyberArk Certificate Manager, as well as local in-cluster issuance.
 
+## Quick Start for Testing
+
+To run tests, first make sure you have the necessary tools installed, then use:
+
+```bash
+# Run all unit tests
+make unit-test
+
+# Run tests for a specific package in the core module
+make test WHAT=./pkg/controller/certificates/keymanager
+
+# Run tests for a specific package using the convenience target
+make test-controller-package PACKAGE=./pkg/controller/certificates/keymanager
+
+# Run tests for a specific Go module (e.g., cmd/controller)
+make test-module MODULE=./cmd/controller
+
+# Run all controller module unit tests
+make unit-test-controller
+```
+
+For more information, see `make help` or the [cert-manager documentation](https://cert-manager.io/docs/).
+
 cert-manager also ensures certificates remain valid and up to date, attempting to renew certificates at an appropriate time before expiry to reduce the risk of outages and remove toil.
 
 ![cert-manager high level overview diagram](https://cert-manager.io/images/high-level-overview.svg)
