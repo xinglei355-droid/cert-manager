@@ -119,6 +119,12 @@ func SetCertificateKeyEncoding(keyEncoding v1.PrivateKeyEncoding) CertificateMod
 	}
 }
 
+func SetCertificateRotationPolicy(rotationPolicy v1.PrivateKeyRotationPolicy) CertificateModifier {
+	return func(crt *v1.Certificate) {
+		crt.Spec.PrivateKey.RotationPolicy = rotationPolicy
+	}
+}
+
 func SetCertificateSecretName(secretName string) CertificateModifier {
 	return func(crt *v1.Certificate) {
 		crt.Spec.SecretName = secretName
