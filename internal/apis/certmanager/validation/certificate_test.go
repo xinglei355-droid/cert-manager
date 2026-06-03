@@ -199,6 +199,49 @@ func TestValidateCertificate(t *testing.T) {
 				field.Required(fldPath.Child("issuerRef", "name"), "must be specified"),
 			},
 		},
+		"invalid with duration less than minimum": {
+			cfg: &internalcmapi.Certificate{
+				Spec: internalcmapi.CertificateSpec{
+					CommonName: "testcn",
+					SecretName: "abc",
+					IssuerRef:  validIssuerRef,
+					Duration:   &metav1.Duration{Duration: time.Minute * 30},
+				},
+			},
+			a: someAdmissionRequest,
+			errs: []*field.Error{
+				field.Invalid(fldPath.Child("duration"), time.Minute*30, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)),
+			},
+		},
+		"invalid with renewBefore less than minimum": {
+			cfg: &internalcmapi.Certificate{
+				Spec: internalcmapi.CertificateSpec{
+					CommonName:  "testcn",
+					SecretName:  "abc",
+					IssuerRef:   validIssuerRef,
+					RenewBefore: &metav1.Duration{Duration: time.Minute * 2},
+				},
+			},
+			a: someAdmissionRequest,
+			errs: []*field.Error{
+				field.Invalid(fldPath.Child("renewBefore"), time.Minute*2, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore)),
+			},
+		},
+		"invalid with renewBefore greater than duration": {
+			cfg: &internalcmapi.Certificate{
+				Spec: internalcmapi.CertificateSpec{
+					CommonName:  "testcn",
+					SecretName:  "abc",
+					IssuerRef:   validIssuerRef,
+					Duration:    &metav1.Duration{Duration: time.Hour * 2},
+					RenewBefore: &metav1.Duration{Duration: time.Hour * 3},
+				},
+			},
+			a: someAdmissionRequest,
+			errs: []*field.Error{
+				field.Invalid(fldPath.Child("renewBefore"), time.Hour*3, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", time.Hour*2, time.Hour*3)),
+			},
+		},
 		"valid certificate with only dnsNames": {
 			cfg: &internalcmapi.Certificate{
 				Spec: internalcmapi.CertificateSpec{
