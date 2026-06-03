@@ -385,7 +385,8 @@ func TestVault_Setup(t *testing.T) {
 					},
 				},
 			},
-			expectErr: "Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
+			expectErr:  "Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
+			expectCond: "Ready False: VaultError: Failed to verify Vault is initialized and unsealed: Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
 		},
 		{
 			name: "server with leading whitespace should fail to parse",
@@ -403,7 +404,8 @@ func TestVault_Setup(t *testing.T) {
 					},
 				},
 			},
-			expectErr: "error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
+			expectErr:  "error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
+			expectCond: "Ready False: VaultError: Failed to initialize Vault client: error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
 		},
 		{
 			name: "valid auth.clientCertificate: All fields can be omitted",
@@ -460,9 +462,9 @@ func TestVault_Setup(t *testing.T) {
 			err := v.Setup(t.Context(), givenIssuer)
 			if tt.expectErr != "" {
 				assert.EqualError(t, err, tt.expectErr)
-				return
+			} else {
+				assert.NoError(t, err)
 			}
-			assert.NoError(t, err)
 
 			// The webhook-side validation of the Vault issuer configuration
 			// didn't exist for a long time. The only validation that was done

@@ -1,0 +1,112 @@
+diff --git a/pkg/controller/clusterissuers/sync.go b/pkg/controller/clusterissuers/sync.go
+index 05578d398..574875c27 100644
+--- a/pkg/controller/clusterissuers/sync.go
++++ b/pkg/controller/clusterissuers/sync.go
+@@ -26,7 +26,9 @@ import (
+ 
+ 	"github.com/cert-manager/cert-manager/internal/controller/feature"
+ 	internalissuers "github.com/cert-manager/cert-manager/internal/controller/issuers"
++	apiutil "github.com/cert-manager/cert-manager/pkg/api/util"
+ 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+ 	"github.com/cert-manager/cert-manager/pkg/controller/globals"
+ 	logf "github.com/cert-manager/cert-manager/pkg/logs"
+ 	utilfeature "github.com/cert-manager/cert-manager/pkg/util/feature"
+@@ -53,6 +55,10 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.ClusterIssuer) (err er
+ 
+ 	i, err := c.issuerFactory.IssuerFor(issuerCopy)
+ 	if err != nil {
++		s := messageErrorInitIssuer + err.Error()
++		log.Error(err, "error getting issuer")
++		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
++		apiutil.SetIssuerCondition(issuerCopy, issuerCopy.GetGeneration(), cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
+ 		return err
+ 	}
+ 
+@@ -61,6 +67,12 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.ClusterIssuer) (err er
+ 		s := messageErrorInitIssuer + err.Error()
+ 		log.Error(err, "error setting up issuer")
+ 		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
++		if !apiutil.IssuerHasCondition(issuerCopy, cmapi.IssuerCondition{
++			Type:   cmapi.IssuerConditionReady,
++			Status: cmmeta.ConditionFalse,
++		}) {
++			apiutil.SetIssuerCondition(issuerCopy, issuerCopy.GetGeneration(), cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
++		}
+ 		return err
+ 	}
+ 
+diff --git a/pkg/controller/issuers/sync.go b/pkg/controller/issuers/sync.go
+index c8f79dcc0..c2874f2d3 100644
+--- a/pkg/controller/issuers/sync.go
++++ b/pkg/controller/issuers/sync.go
+@@ -26,7 +26,9 @@ import (
+ 
+ 	"github.com/cert-manager/cert-manager/internal/controller/feature"
+ 	internalissuers "github.com/cert-manager/cert-manager/internal/controller/issuers"
++	apiutil "github.com/cert-manager/cert-manager/pkg/api/util"
+ 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+ 	"github.com/cert-manager/cert-manager/pkg/controller/globals"
+ 	logf "github.com/cert-manager/cert-manager/pkg/logs"
+ 	utilfeature "github.com/cert-manager/cert-manager/pkg/util/feature"
+@@ -53,6 +55,10 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.Issuer) (err error) {
+ 
+ 	i, err := c.issuerFactory.IssuerFor(issuerCopy)
+ 	if err != nil {
++		s := messageErrorInitIssuer + err.Error()
++		log.V(logf.WarnLevel).Info(s)
++		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
++		apiutil.SetIssuerCondition(issuerCopy, issuerCopy.GetGeneration(), cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
+ 		return err
+ 	}
+ 
+@@ -61,6 +67,12 @@ func (c *controller) Sync(ctx context.Context, iss *cmapi.Issuer) (err error) {
+ 		s := messageErrorInitIssuer + err.Error()
+ 		log.V(logf.WarnLevel).Info(s)
+ 		c.recorder.Event(issuerCopy, corev1.EventTypeWarning, errorInitIssuer, s)
++		if !apiutil.IssuerHasCondition(issuerCopy, cmapi.IssuerCondition{
++			Type:   cmapi.IssuerConditionReady,
++			Status: cmmeta.ConditionFalse,
++		}) {
++			apiutil.SetIssuerCondition(issuerCopy, issuerCopy.GetGeneration(), cmapi.IssuerConditionReady, cmmeta.ConditionFalse, errorInitIssuer, s)
++		}
+ 		return err
+ 	}
+ 
+diff --git a/pkg/issuer/vault/setup_test.go b/pkg/issuer/vault/setup_test.go
+index 6d84bdbf5..2a1042eb9 100644
+--- a/pkg/issuer/vault/setup_test.go
++++ b/pkg/issuer/vault/setup_test.go
+@@ -385,7 +385,8 @@ func TestVault_Setup(t *testing.T) {
+ 					},
+ 				},
+ 			},
+-			expectErr: "Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
++			expectErr:  "Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
++			expectCond: "Ready False: VaultError: Failed to verify Vault is initialized and unsealed: Get \"https:///vault.example.com/v1/sys/health\": http: no Host in request URL",
+ 		},
+ 		{
+ 			name: "server with leading whitespace should fail to parse",
+@@ -403,7 +404,8 @@ func TestVault_Setup(t *testing.T) {
+ 					},
+ 				},
+ 			},
+-			expectErr: "error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
++			expectErr:  "error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
++			expectCond: "Ready False: VaultError: Failed to initialize Vault client: error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
+ 		},
+ 		{
+ 			name: "valid auth.clientCertificate: All fields can be omitted",
+@@ -460,9 +462,9 @@ func TestVault_Setup(t *testing.T) {
+ 			err := v.Setup(t.Context(), givenIssuer)
+ 			if tt.expectErr != "" {
+ 				assert.EqualError(t, err, tt.expectErr)
+-				return
++			} else {
++				assert.NoError(t, err)
+ 			}
+-			assert.NoError(t, err)
+ 
+ 			// The webhook-side validation of the Vault issuer configuration
+ 			// didn't exist for a long time. The only validation that was done
