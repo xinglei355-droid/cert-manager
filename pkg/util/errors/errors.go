@@ -16,9 +16,16 @@ limitations under the License.
 
 package errors
 
-import "fmt"
+import (
+	stderrors "errors"
+	"fmt"
+)
 
 type invalidDataError struct{ error }
+
+func (e *invalidDataError) Unwrap() error {
+	return e.error
+}
 
 func NewInvalidData(str string, obj ...any) error {
 	return &invalidDataError{error: fmt.Errorf(str, obj...)}
@@ -29,4 +36,22 @@ func IsInvalidData(err error) bool {
 		return false
 	}
 	return true
+}
+
+func RootCause(err error) error {
+	for err != nil {
+		if unwrapped := stderrors.Unwrap(err); unwrapped != nil {
+			err = unwrapped
+			continue
+		}
+		if multiErr, ok := err.(interface{ Unwrap() []error }); ok {
+			unwrapped := multiErr.Unwrap()
+			if len(unwrapped) > 0 && unwrapped[0] != nil {
+				err = unwrapped[0]
+				continue
+			}
+		}
+		break
+	}
+	return err
 }

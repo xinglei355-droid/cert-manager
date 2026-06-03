@@ -25,6 +25,7 @@ import (
 	v1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	logf "github.com/cert-manager/cert-manager/pkg/logs"
+	cmerrors "github.com/cert-manager/cert-manager/pkg/util/errors"
 	"github.com/cert-manager/cert-manager/pkg/util/kube"
 )
 
@@ -48,18 +49,20 @@ func (c *CA) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
 	cert, err := kube.SecretTLSCert(ctx, c.secretsLister, resourceNamespace, issuer.GetSpec().CA.SecretName)
 	if err != nil {
 		log.Error(err, "error getting signing CA TLS certificate")
-		s := messageErrorGetKeyPair + err.Error()
-		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorGetKeyPair, s)
-		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorGetKeyPair, s)
+		eventMessage := messageErrorGetKeyPair + err.Error()
+		conditionMessage := messageErrorGetKeyPair + cmerrors.RootCause(err).Error()
+		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorGetKeyPair, eventMessage)
+		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorGetKeyPair, conditionMessage)
 		return err
 	}
 
 	_, err = kube.SecretTLSKey(ctx, c.secretsLister, resourceNamespace, issuer.GetSpec().CA.SecretName)
 	if err != nil {
 		log.Error(err, "error getting signing CA private key")
-		s := messageErrorGetKeyPair + err.Error()
-		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorGetKeyPair, s)
-		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorGetKeyPair, s)
+		eventMessage := messageErrorGetKeyPair + err.Error()
+		conditionMessage := messageErrorGetKeyPair + cmerrors.RootCause(err).Error()
+		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorGetKeyPair, eventMessage)
+		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorGetKeyPair, conditionMessage)
 		return err
 	}
 

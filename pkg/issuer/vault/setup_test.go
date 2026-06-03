@@ -403,7 +403,8 @@ func TestVault_Setup(t *testing.T) {
 					},
 				},
 			},
-			expectErr: "error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
+			expectCond: "Ready False: VaultError: Failed to initialize Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
+			expectErr:  "error initializing Vault client: parse \" https://vault.example.com\": first path segment in URL cannot contain colon",
 		},
 		{
 			name: "valid auth.clientCertificate: All fields can be omitted",
@@ -460,9 +461,9 @@ func TestVault_Setup(t *testing.T) {
 			err := v.Setup(t.Context(), givenIssuer)
 			if tt.expectErr != "" {
 				assert.EqualError(t, err, tt.expectErr)
-				return
+			} else {
+				assert.NoError(t, err)
 			}
-			assert.NoError(t, err)
 
 			// The webhook-side validation of the Vault issuer configuration
 			// didn't exist for a long time. The only validation that was done
@@ -484,7 +485,7 @@ func TestVault_Setup(t *testing.T) {
 			if tt.expectCond != "" {
 				require.Len(t, givenIssuer.Status.Conditions, 1)
 				assert.Equal(t, tt.expectCond, fmt.Sprintf("%s %s: %s: %s", givenIssuer.Status.Conditions[0].Type, givenIssuer.Status.Conditions[0].Status, givenIssuer.Status.Conditions[0].Reason, givenIssuer.Status.Conditions[0].Message))
-			} else {
+			} else if tt.expectErr == "" {
 				require.Len(t, givenIssuer.Status.Conditions, 0)
 			}
 		})

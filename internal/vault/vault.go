@@ -130,7 +130,7 @@ func New(ctx context.Context, namespace string, createTokenFn func(ns string) Cr
 
 	client, err := vault.NewClient(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("error initializing Vault client: %s", err.Error())
+		return nil, fmt.Errorf("error initializing Vault client: %w", err)
 	}
 
 	// Set the Vault namespace.

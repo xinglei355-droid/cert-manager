@@ -78,6 +78,7 @@ func TestAcme_Setup(t *testing.T) {
 		notFoundErr    = apierrors.NewNotFound(corev1.Resource("test"), "test")
 		invalidDataErr = errors.NewInvalidData("test")
 		someErr        = fmt.Errorf("test")
+		wrappedSomeErr = fmt.Errorf("wrapped: %w", someErr)
 		invalidURL     = "%"
 		acmeErr450     = &acmeapi.Error{StatusCode: 450}
 		acmeErr500     = &acmeapi.Error{StatusCode: 500}
@@ -168,6 +169,18 @@ func TestAcme_Setup(t *testing.T) {
 				gen.SetIssuerACMEPrivKeyRef(issuerSecretKeyName)),
 			kfsErr:                     notFoundErr,
 			acmePrivKeySecretCreateErr: someErr,
+			expectedConditions: []cmapi.IssuerCondition{
+				*gen.IssuerConditionFrom(readyFalseCondition,
+					gen.SetIssuerConditionReason(errorAccountRegistrationFailed),
+					gen.SetIssuerConditionMessage(messageAccountRegistrationFailed+someErr.Error())),
+			},
+			wantsErr: true,
+		},
+		"ACME private key secret creation keeps root cause in condition message": {
+			issuer: gen.IssuerFrom(baseIssuer,
+				gen.SetIssuerACMEPrivKeyRef(issuerSecretKeyName)),
+			kfsErr:                     notFoundErr,
+			acmePrivKeySecretCreateErr: wrappedSomeErr,
 			expectedConditions: []cmapi.IssuerCondition{
 				*gen.IssuerConditionFrom(readyFalseCondition,
 					gen.SetIssuerConditionReason(errorAccountRegistrationFailed),
