@@ -1,0 +1,55 @@
+diff --git a/internal/apis/certmanager/validation/certificate_test.go b/internal/apis/certmanager/validation/certificate_test.go
+index 9064767c1..c8ede205b 100644
+--- a/internal/apis/certmanager/validation/certificate_test.go
++++ b/internal/apis/certmanager/validation/certificate_test.go
+@@ -934,6 +934,50 @@ func TestValidateCertificate(t *testing.T) {
+ 				},
+ 			},
+ 		},
++		"invalid with duration less than minimum": {
++			cfg: &internalcmapi.Certificate{
++				Spec: internalcmapi.CertificateSpec{
++					CommonName: "testcn",
++					SecretName: "abc",
++					IssuerRef:  validIssuerRef,
++					Duration:    &metav1.Duration{Duration: time.Minute * 30},
++					RenewBefore: &metav1.Duration{Duration: time.Minute * 10},
++				},
++			},
++			a: someAdmissionRequest,
++			errs: []*field.Error{
++				field.Invalid(fldPath.Child("duration"), time.Minute*30, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)),
++			},
++		},
++		"invalid with renewBefore less than minimum": {
++			cfg: &internalcmapi.Certificate{
++				Spec: internalcmapi.CertificateSpec{
++					CommonName: "testcn",
++					SecretName: "abc",
++					IssuerRef:  validIssuerRef,
++					RenewBefore: &metav1.Duration{Duration: time.Second},
++				},
++			},
++			a: someAdmissionRequest,
++			errs: []*field.Error{
++				field.Invalid(fldPath.Child("renewBefore"), time.Second, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore)),
++			},
++		},
++		"invalid with renewBefore greater than duration": {
++			cfg: &internalcmapi.Certificate{
++				Spec: internalcmapi.CertificateSpec{
++					CommonName: "testcn",
++					SecretName: "abc",
++					IssuerRef:  validIssuerRef,
++					Duration:    &metav1.Duration{Duration: time.Hour * 24 * 30},
++					RenewBefore: &metav1.Duration{Duration: time.Hour * 24 * 365},
++				},
++			},
++			a: someAdmissionRequest,
++			errs: []*field.Error{
++				field.Invalid(fldPath.Child("renewBefore"), time.Hour*24*365, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", time.Hour*24*30, time.Hour*24*365)),
++			},
++		},
+ 	}
+ 	for n, s := range scenarios {
+ 		t.Run(n, func(t *testing.T) {
