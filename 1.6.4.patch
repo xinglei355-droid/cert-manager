@@ -1,0 +1,69 @@
+diff --git a/pkg/issuer/ca/setup.go b/pkg/issuer/ca/setup.go
+index 70bd0df12..2dc98c419 100644
+--- a/pkg/issuer/ca/setup.go
++++ b/pkg/issuer/ca/setup.go
+@@ -65,7 +65,7 @@ func (c *CA) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
+ 
+ 	log = logf.WithRelatedResourceName(log, issuer.GetSpec().CA.SecretName, resourceNamespace, "Secret")
+ 	if !cert.IsCA {
+-		s := messageErrorGetKeyPair + "certificate is not a CA"
++		s := messageErrorGetKeyPair + "certificate in Secret \"" + resourceNamespace + "/" + issuer.GetSpec().CA.SecretName + "\" is not a CA"
+ 		log.Error(nil, "signing certificate is not a CA")
+ 		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorInvalidKeyPair, s)
+ 		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorInvalidKeyPair, s)
+diff --git a/pkg/issuer/vault/setup.go b/pkg/issuer/vault/setup.go
+index cb429f8a2..1e361a187 100644
+--- a/pkg/issuer/vault/setup.go
++++ b/pkg/issuer/vault/setup.go
+@@ -38,7 +38,8 @@ const (
+ 	messageVaultClientInitFailed             = "Failed to initialize Vault client"
+ 	messageVaultInitializedAndUnsealedFailed = "Failed to verify Vault is initialized and unsealed"
+ 	messageVaultConfigRequired               = "Vault config cannot be empty"
+-	messageServerAndPathRequired             = "Vault server and path are required fields"
++	messageServerRequired                    = "Vault server is a required field"
++	messagePathRequired                      = "Vault path is a required field"
+ 	messageAuthFieldsRequired                = "Vault tokenSecretRef, appRole, clientCertificate, kubernetes, or aws is required"
+ 	messageMultipleAuthFieldsSet             = "Multiple auth methods cannot be set on the same Vault issuer"
+ 
+@@ -59,10 +60,15 @@ func (v *Vault) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
+ 	}
+ 
+ 	// check if Vault server info is specified.
+-	if issuer.GetSpec().Vault.Server == "" ||
+-		issuer.GetSpec().Vault.Path == "" {
+-		logf.FromContext(ctx).V(logf.WarnLevel).Info(messageServerAndPathRequired, "issuer", klog.KObj(issuer))
+-		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messageServerAndPathRequired)
++	if issuer.GetSpec().Vault.Server == "" {
++		logf.FromContext(ctx).V(logf.WarnLevel).Info(messageServerRequired, "issuer", klog.KObj(issuer))
++		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messageServerRequired)
++		return nil
++	}
++
++	if issuer.GetSpec().Vault.Path == "" {
++		logf.FromContext(ctx).V(logf.WarnLevel).Info(messagePathRequired, "issuer", klog.KObj(issuer))
++		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messagePathRequired)
+ 		return nil
+ 	}
+ 
+diff --git a/pkg/issuer/vault/setup_test.go b/pkg/issuer/vault/setup_test.go
+index 6d84bdbf5..7d4054e32 100644
+--- a/pkg/issuer/vault/setup_test.go
++++ b/pkg/issuer/vault/setup_test.go
+@@ -78,7 +78,7 @@ func TestVault_Setup(t *testing.T) {
+ 					Server: "https://vault.example.com",
+ 				},
+ 			},
+-			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
++			expectCond:    "Ready False: VaultError: Vault path is a required field",
+ 			webhookReject: true,
+ 		},
+ 		{
+@@ -88,7 +88,7 @@ func TestVault_Setup(t *testing.T) {
+ 					Path: "pki_int",
+ 				},
+ 			},
+-			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
++			expectCond:    "Ready False: VaultError: Vault server is a required field",
+ 			webhookReject: true,
+ 		},
+ 		{
