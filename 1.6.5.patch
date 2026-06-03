@@ -1,3 +1,118 @@
+diff --git a/1.6.5.patch b/1.6.5.patch
+new file mode 100644
+index 000000000..991b121e7
+--- /dev/null
++++ b/1.6.5.patch
+@@ -0,0 +1,109 @@
++diff --git a/pkg/issuer/acme/setup.go b/pkg/issuer/acme/setup.go
++index 315cde9d1..118c92fcb 100644
++--- a/pkg/issuer/acme/setup.go
+++++ b/pkg/issuer/acme/setup.go
++@@ -60,7 +60,7 @@ const (
++ 
++ 	messageAccountRegistrationFailed     = "Failed to register ACME account: "
++ 	messageAccountVerificationFailed     = "Failed to verify ACME account: "
++-	messageAccountUpdateFailed           = "Failed to update ACME account:"
+++	messageAccountUpdateFailed           = "Failed to update ACME account: "
++ 	messageAccountRegistered             = "The ACME account was registered with the ACME server"
++ 	messageAccountVerified               = "The ACME account was verified with the ACME server"
++ 	messageNoSecretKeyGenerationDisabled = "the ACME issuer config has 'disableAccountKeyGeneration' set to true, but the secret was not found: "
++diff --git a/pkg/issuer/ca/setup.go b/pkg/issuer/ca/setup.go
++index 70bd0df12..3a47a13ac 100644
++--- a/pkg/issuer/ca/setup.go
+++++ b/pkg/issuer/ca/setup.go
++@@ -18,6 +18,7 @@ package ca
++ 
++ import (
++ 	"context"
+++	"fmt"
++ 
++ 	corev1 "k8s.io/api/core/v1"
++ 
++@@ -34,7 +35,8 @@ const (
++ 
++ 	successKeyPairVerified = "KeyPairVerified"
++ 
++-	messageErrorGetKeyPair = "Error getting keypair for CA issuer: "
+++	messageErrorGetKeyPair    = "Error getting keypair for CA issuer: "
+++	messageErrorInvalidKeyPair = "Signing CA certificate is not a CA: "
++ 
++ 	messageKeyPairVerified = "Signing CA verified"
++ )
++@@ -65,11 +67,10 @@ func (c *CA) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
++ 
++ 	log = logf.WithRelatedResourceName(log, issuer.GetSpec().CA.SecretName, resourceNamespace, "Secret")
++ 	if !cert.IsCA {
++-		s := messageErrorGetKeyPair + "certificate is not a CA"
+++		s := fmt.Sprintf("%scertificate signed by secret %q is not a CA", messageErrorInvalidKeyPair, issuer.GetSpec().CA.SecretName)
++ 		log.Error(nil, "signing certificate is not a CA")
++ 		c.Recorder.Event(issuer, corev1.EventTypeWarning, errorInvalidKeyPair, s)
++ 		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorInvalidKeyPair, s)
++-		// Don't return an error here as there is nothing more we can do
++ 		return nil
++ 	}
++ 
++diff --git a/pkg/issuer/vault/setup.go b/pkg/issuer/vault/setup.go
++index cb429f8a2..d386827af 100644
++--- a/pkg/issuer/vault/setup.go
+++++ b/pkg/issuer/vault/setup.go
++@@ -38,6 +38,8 @@ const (
++ 	messageVaultClientInitFailed             = "Failed to initialize Vault client"
++ 	messageVaultInitializedAndUnsealedFailed = "Failed to verify Vault is initialized and unsealed"
++ 	messageVaultConfigRequired               = "Vault config cannot be empty"
+++	messageServerRequired                    = "Vault server is a required field"
+++	messagePathRequired                      = "Vault path is a required field"
++ 	messageServerAndPathRequired             = "Vault server and path are required fields"
++ 	messageAuthFieldsRequired                = "Vault tokenSecretRef, appRole, clientCertificate, kubernetes, or aws is required"
++ 	messageMultipleAuthFieldsSet             = "Multiple auth methods cannot be set on the same Vault issuer"
++@@ -59,10 +61,15 @@ func (v *Vault) Setup(ctx context.Context, issuer v1.GenericIssuer) error {
++ 	}
++ 
++ 	// check if Vault server info is specified.
++-	if issuer.GetSpec().Vault.Server == "" ||
++-		issuer.GetSpec().Vault.Path == "" {
++-		logf.FromContext(ctx).V(logf.WarnLevel).Info(messageServerAndPathRequired, "issuer", klog.KObj(issuer))
++-		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, messageServerAndPathRequired)
+++	if issuer.GetSpec().Vault.Server == "" || issuer.GetSpec().Vault.Path == "" {
+++		msg := messageServerAndPathRequired
+++		if issuer.GetSpec().Vault.Server == "" && issuer.GetSpec().Vault.Path != "" {
+++			msg = messageServerRequired
+++		} else if issuer.GetSpec().Vault.Server != "" && issuer.GetSpec().Vault.Path == "" {
+++			msg = messagePathRequired
+++		}
+++		logf.FromContext(ctx).V(logf.WarnLevel).Info(msg, "issuer", klog.KObj(issuer))
+++		apiutil.SetIssuerCondition(issuer, issuer.GetGeneration(), v1.IssuerConditionReady, cmmeta.ConditionFalse, errorVault, msg)
++ 		return nil
++ 	}
++ 
++diff --git a/pkg/issuer/vault/setup_test.go b/pkg/issuer/vault/setup_test.go
++index 6d84bdbf5..df4777b22 100644
++--- a/pkg/issuer/vault/setup_test.go
+++++ b/pkg/issuer/vault/setup_test.go
++@@ -78,7 +78,7 @@ func TestVault_Setup(t *testing.T) {
++ 					Server: "https://vault.example.com",
++ 				},
++ 			},
++-			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
+++			expectCond:    "Ready False: VaultError: Vault path is a required field",
++ 			webhookReject: true,
++ 		},
++ 		{
++@@ -88,6 +88,14 @@ func TestVault_Setup(t *testing.T) {
++ 					Path: "pki_int",
++ 				},
++ 			},
+++			expectCond:    "Ready False: VaultError: Vault server is a required field",
+++			webhookReject: true,
+++		},
+++		{
+++			name: "both server and path are missing",
+++			givenIssuer: v1.IssuerConfig{
+++				Vault: &v1.VaultIssuer{},
+++			},
++ 			expectCond:    "Ready False: VaultError: Vault server and path are required fields",
++ 			webhookReject: true,
++ 		},
 diff --git a/pkg/issuer/acme/setup.go b/pkg/issuer/acme/setup.go
 index 315cde9d1..118c92fcb 100644
 --- a/pkg/issuer/acme/setup.go
@@ -46,6 +161,464 @@ index 70bd0df12..3a47a13ac 100644
  		return nil
  	}
  
+diff --git a/pkg/issuer/ca/setup_test.go b/pkg/issuer/ca/setup_test.go
+new file mode 100644
+index 000000000..b4263fa95
+--- /dev/null
++++ b/pkg/issuer/ca/setup_test.go
+@@ -0,0 +1,452 @@
++/*
++Copyright 2020 The cert-manager Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package ca
++
++import (
++	"crypto/rsa"
++	"crypto/x509"
++	"fmt"
++	"math/big"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++	corev1 "k8s.io/api/core/v1"
++	apierrors "k8s.io/apimachinery/pkg/api/errors"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	corelisters "k8s.io/client-go/listers/core/v1"
++	"k8s.io/client-go/tools/record"
++
++	v1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++	"github.com/cert-manager/cert-manager/pkg/controller"
++	"github.com/cert-manager/cert-manager/pkg/util/pki"
++	testlisters "github.com/cert-manager/cert-manager/test/unit/listers"
++)
++
++func mustGenerateCACertAndKey(t *testing.T) (*x509.Certificate, *rsa.PrivateKey, []byte, []byte) {
++	t.Helper()
++	key, err := pki.GenerateRSAPrivateKey(2048)
++	require.NoError(t, err)
++
++	template := &x509.Certificate{
++		SerialNumber:          big.NewInt(1),
++		NotBefore:             time.Now().Add(-time.Hour),
++		NotAfter:              time.Now().Add(time.Hour * 24 * 365),
++		IsCA:                  true,
++		BasicConstraintsValid: true,
++		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
++		DNSNames:              []string{"ca.example.com"},
++	}
++
++	certDER, err := x509.CreateCertificate(nil, template, template, key.Public(), key)
++	require.NoError(t, err)
++
++	cert, err := x509.ParseCertificate(certDER)
++	require.NoError(t, err)
++
++	certPEM, err := pki.EncodeX509(cert)
++	require.NoError(t, err)
++
++	keyPEM := pki.EncodePKCS1PrivateKey(key)
++
++	return cert, key, certPEM, keyPEM
++}
++
++func mustGenerateNonCACertAndKey(t *testing.T) (*x509.Certificate, *rsa.PrivateKey, []byte, []byte) {
++	t.Helper()
++	key, err := pki.GenerateRSAPrivateKey(2048)
++	require.NoError(t, err)
++
++	template := &x509.Certificate{
++		SerialNumber:          big.NewInt(2),
++		NotBefore:             time.Now().Add(-time.Hour),
++		NotAfter:              time.Now().Add(time.Hour * 24 * 365),
++		IsCA:                  false,
++		BasicConstraintsValid: true,
++		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
++		DNSNames:              []string{"leaf.example.com"},
++	}
++
++	caCert, caKey, _, _ := mustGenerateCACertAndKey(t)
++
++	certDER, err := x509.CreateCertificate(nil, template, caCert, key.Public(), caKey)
++	require.NoError(t, err)
++
++	cert, err := x509.ParseCertificate(certDER)
++	require.NoError(t, err)
++
++	certPEM, err := pki.EncodeX509(cert)
++	require.NoError(t, err)
++
++	keyPEM := pki.EncodePKCS1PrivateKey(key)
++
++	return cert, key, certPEM, keyPEM
++}
++
++func TestCA_Setup(t *testing.T) {
++	const (
++		testNamespace   = "test-namespace"
++		testSecretName  = "test-ca-secret"
++		clusterResourceNS = "cluster-resource-namespace"
++	)
++
++	_, _, caCertPEM, caKeyPEM := mustGenerateCACertAndKey(t)
++	_, _, nonCACertPEM, nonCAKeyPEM := mustGenerateNonCACertAndKey(t)
++
++	tests := []struct {
++		name              string
++		issuer            *v1.Issuer
++		secret            *corev1.Secret
++		secretErr         error
++		expectCond        string
++		expectCondPrefix  string
++		expectErr         string
++	}{
++		{
++			name: "valid CA issuer with CA certificate",
++			issuer: &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: testNamespace,
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: testSecretName,
++						},
++					},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: testNamespace},
++				Data: map[string][]byte{
++					corev1.TLSCertKey:       caCertPEM,
++					corev1.TLSPrivateKeyKey: caKeyPEM,
++				},
++			},
++			expectCond: "Ready True: KeyPairVerified: Signing CA verified",
++		},
++		{
++			name: "secret does not exist",
++			issuer: &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: testNamespace,
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: testSecretName,
++						},
++					},
++				},
++			},
++			secretErr: apierrors.NewNotFound(corev1.Resource("secrets"), testSecretName),
++			expectCondPrefix: "Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: secrets",
++			expectErr:        "secrets",
++		},
++		{
++			name: "secret exists but TLS cert data is missing",
++			issuer: &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: testNamespace,
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: testSecretName,
++						},
++					},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: testNamespace},
++				Data: map[string][]byte{
++					corev1.TLSPrivateKeyKey: caKeyPEM,
++				},
++			},
++			expectCond: fmt.Sprintf(`Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: no data for %q in secret '%s/%s'`, corev1.TLSCertKey, testNamespace, testSecretName),
++			expectErr:  fmt.Sprintf(`Error getting keypair for CA issuer: no data for %q in secret '%s/%s'`, corev1.TLSCertKey, testNamespace, testSecretName),
++		},
++		{
++			name: "secret exists but TLS cert data is invalid",
++			issuer: &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: testNamespace,
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: testSecretName,
++						},
++					},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: testNamespace},
++				Data: map[string][]byte{
++					corev1.TLSCertKey:       []byte("not-a-valid-cert"),
++					corev1.TLSPrivateKeyKey: caKeyPEM,
++				},
++			},
++			expectCondPrefix: "Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: error decoding certificate PEM block",
++		},
++		{
++			name: "secret exists but TLS private key data is missing",
++			issuer: &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: testNamespace,
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: testSecretName,
++						},
++					},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: testNamespace},
++				Data: map[string][]byte{
++					corev1.TLSCertKey: caCertPEM,
++				},
++			},
++			expectCond: fmt.Sprintf(`Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: no data for %q in secret '%s/%s'`, corev1.TLSPrivateKeyKey, testNamespace, testSecretName),
++			expectErr:  fmt.Sprintf(`Error getting keypair for CA issuer: no data for %q in secret '%s/%s'`, corev1.TLSPrivateKeyKey, testNamespace, testSecretName),
++		},
++		{
++			name: "secret exists but TLS private key data is invalid",
++			issuer: &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: testNamespace,
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: testSecretName,
++						},
++					},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: testNamespace},
++				Data: map[string][]byte{
++					corev1.TLSCertKey:       caCertPEM,
++					corev1.TLSPrivateKeyKey: []byte("not-a-valid-key"),
++				},
++			},
++			expectCondPrefix: "Ready False: ErrGetKeyPair: Error getting keypair for CA issuer: error decoding private key PEM block",
++		},
++		{
++			name: "certificate is not a CA",
++			issuer: &v1.Issuer{
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test-issuer",
++					Namespace: testNamespace,
++				},
++				Spec: v1.IssuerSpec{
++					IssuerConfig: v1.IssuerConfig{
++						CA: &v1.CAIssuer{
++							SecretName: testSecretName,
++						},
++					},
++				},
++			},
++			secret: &corev1.Secret{
++				ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: testNamespace},
++				Data: map[string][]byte{
++					corev1.TLSCertKey:       nonCACertPEM,
++					corev1.TLSPrivateKeyKey: nonCAKeyPEM,
++				},
++			},
++			expectCond: fmt.Sprintf(`Ready False: ErrInvalidKeyPair: Signing CA certificate is not a CA: certificate signed by secret %q is not a CA`, testSecretName),
++		},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			recorder := record.NewFakeRecorder(10)
++
++			c := &CA{
++				Context: &controller.Context{
++					Recorder: recorder,
++					IssuerOptions: controller.IssuerOptions{
++						ClusterResourceNamespace: clusterResourceNS,
++					},
++				},
++				secretsLister: &testlisters.FakeSecretLister{
++					SecretsFn: func(namespace string) corelisters.SecretNamespaceLister {
++						return &testlisters.FakeSecretNamespaceLister{
++							GetFn: func(name string) (*corev1.Secret, error) {
++								if tt.secretErr != nil {
++									return nil, tt.secretErr
++								}
++								if tt.secret != nil {
++									return tt.secret, nil
++								}
++								return nil, apierrors.NewNotFound(corev1.Resource("secrets"), name)
++							},
++						}
++					},
++				},
++			}
++
++			err := c.Setup(t.Context(), tt.issuer)
++
++			if tt.expectErr != "" {
++				assert.Error(t, err)
++				assert.Contains(t, err.Error(), tt.expectErr)
++			} else {
++				assert.NoError(t, err)
++			}
++
++			if tt.expectCond != "" {
++				require.Len(t, tt.issuer.Status.Conditions, 1)
++				cond := tt.issuer.Status.Conditions[0]
++				gotCond := fmt.Sprintf("%s %s: %s: %s", cond.Type, cond.Status, cond.Reason, cond.Message)
++				assert.Equal(t, tt.expectCond, gotCond)
++			}
++			if tt.expectCondPrefix != "" {
++				require.Len(t, tt.issuer.Status.Conditions, 1)
++				cond := tt.issuer.Status.Conditions[0]
++				gotCond := fmt.Sprintf("%s %s: %s: %s", cond.Type, cond.Status, cond.Reason, cond.Message)
++				assert.True(t, strings.HasPrefix(gotCond, tt.expectCondPrefix), "expected condition to start with %q, got %q", tt.expectCondPrefix, gotCond)
++			}
++		})
++	}
++}
++
++func TestCA_Setup_ConditionPreservesUnderlyingError(t *testing.T) {
++	const (
++		testNamespace  = "test-namespace"
++		testSecretName = "missing-secret"
++	)
++
++	issuer := &v1.Issuer{
++		ObjectMeta: metav1.ObjectMeta{
++			Name:      "test-issuer",
++			Namespace: testNamespace,
++		},
++		Spec: v1.IssuerSpec{
++			IssuerConfig: v1.IssuerConfig{
++				CA: &v1.CAIssuer{
++					SecretName: testSecretName,
++				},
++			},
++		},
++	}
++
++	notFoundErr := apierrors.NewNotFound(corev1.Resource("secrets"), testSecretName)
++
++	recorder := record.NewFakeRecorder(10)
++	c := &CA{
++		Context: &controller.Context{
++			Recorder: recorder,
++			IssuerOptions: controller.IssuerOptions{
++				ClusterResourceNamespace: "cluster-resource-namespace",
++			},
++		},
++		secretsLister: &testlisters.FakeSecretLister{
++			SecretsFn: func(namespace string) corelisters.SecretNamespaceLister {
++				return &testlisters.FakeSecretNamespaceLister{
++					GetFn: func(name string) (*corev1.Secret, error) {
++						return nil, notFoundErr
++					},
++				}
++			},
++		},
++	}
++
++	err := c.Setup(t.Context(), issuer)
++	require.Error(t, err)
++
++	require.Len(t, issuer.Status.Conditions, 1)
++	cond := issuer.Status.Conditions[0]
++
++	assert.Equal(t, v1.IssuerConditionReady, cond.Type)
++	assert.Equal(t, cmmeta.ConditionFalse, cond.Status)
++	assert.Equal(t, errorGetKeyPair, cond.Reason)
++	assert.Contains(t, cond.Message, notFoundErr.Error())
++	assert.Contains(t, cond.Message, testSecretName)
++}
++
++func TestCA_Setup_NotCACertificateIncludesSecretName(t *testing.T) {
++	const (
++		testNamespace  = "test-namespace"
++		testSecretName = "non-ca-secret"
++	)
++
++	_, _, nonCACertPEM, nonCAKeyPEM := mustGenerateNonCACertAndKey(t)
++
++	issuer := &v1.Issuer{
++		ObjectMeta: metav1.ObjectMeta{
++			Name:      "test-issuer",
++			Namespace: testNamespace,
++		},
++		Spec: v1.IssuerSpec{
++			IssuerConfig: v1.IssuerConfig{
++				CA: &v1.CAIssuer{
++					SecretName: testSecretName,
++				},
++			},
++		},
++	}
++
++	recorder := record.NewFakeRecorder(10)
++	c := &CA{
++		Context: &controller.Context{
++			Recorder: recorder,
++			IssuerOptions: controller.IssuerOptions{
++				ClusterResourceNamespace: "cluster-resource-namespace",
++			},
++		},
++		secretsLister: &testlisters.FakeSecretLister{
++			SecretsFn: func(namespace string) corelisters.SecretNamespaceLister {
++				return &testlisters.FakeSecretNamespaceLister{
++					GetFn: func(name string) (*corev1.Secret, error) {
++						return &corev1.Secret{
++							ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: testNamespace},
++							Data: map[string][]byte{
++								corev1.TLSCertKey:       nonCACertPEM,
++								corev1.TLSPrivateKeyKey: nonCAKeyPEM,
++							},
++						}, nil
++					},
++				}
++			},
++		},
++	}
++
++	err := c.Setup(t.Context(), issuer)
++	require.NoError(t, err)
++
++	require.Len(t, issuer.Status.Conditions, 1)
++	cond := issuer.Status.Conditions[0]
++
++	assert.Equal(t, v1.IssuerConditionReady, cond.Type)
++	assert.Equal(t, cmmeta.ConditionFalse, cond.Status)
++	assert.Equal(t, errorInvalidKeyPair, cond.Reason)
++	assert.Contains(t, cond.Message, testSecretName)
++	assert.Contains(t, cond.Message, "not a CA")
++}
 diff --git a/pkg/issuer/vault/setup.go b/pkg/issuer/vault/setup.go
 index cb429f8a2..d386827af 100644
 --- a/pkg/issuer/vault/setup.go
