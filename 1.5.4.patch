@@ -1,8 +1,8 @@
 diff --git a/1.5.4.patch b/1.5.4.patch
-index 874c146f4..e69de29bb 100644
+index 874c146f4..62c2f9bef 100644
 --- a/1.5.4.patch
 +++ b/1.5.4.patch
-@@ -1,98 +0,0 @@
+@@ -1,98 +1,189 @@
 -diff --git a/internal/apis/certmanager/validation/certificate.go b/internal/apis/certmanager/validation/certificate.go
 -index 8a0b9f4f6..a64b02f8f 100644
 ---- a/internal/apis/certmanager/validation/certificate.go
@@ -77,7 +77,116 @@ index 874c146f4..e69de29bb 100644
 -@@ -1081,7 +1081,7 @@ func TestValidateDuration(t *testing.T) {
 - 					IssuerRef:             validIssuerRef,
 - 				},
-- 			},
++diff --git a/1.5.4.patch b/1.5.4.patch
++index 874c146f4..e69de29bb 100644
++--- a/1.5.4.patch
+++++ b/1.5.4.patch
++@@ -1,98 +0,0 @@
++-diff --git a/internal/apis/certmanager/validation/certificate.go b/internal/apis/certmanager/validation/certificate.go
++-index 8a0b9f4f6..a64b02f8f 100644
++---- a/internal/apis/certmanager/validation/certificate.go
++-+++ b/internal/apis/certmanager/validation/certificate.go
++-@@ -360,7 +360,7 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
++- 
++- 	duration := util.DefaultCertDuration(crt.Duration)
++- 	if duration < cmapi.MinimumCertificateDuration {
++--		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)))
++-+		el = append(el, field.Invalid(fldPath.Child("duration"), duration, fmt.Sprintf("certificate duration must be at least %s, got %s", cmapi.MinimumCertificateDuration, duration)))
++- 	}
++- 
++- 	// Must set at most one of spec.renewBefore or spec.renewBeforePercentage.
++-@@ -371,11 +371,11 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
++- 
++- 	// If spec.renewBefore is set, check that it is not less than the minimum.
++- 	if crt.RenewBefore != nil && crt.RenewBefore.Duration < cmapi.MinimumRenewBefore {
++--		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore)))
++-+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore must be at least %s, got %s", cmapi.MinimumRenewBefore, crt.RenewBefore.Duration)))
++- 	}
++- 	// If spec.renewBefore is set, it must be less than the duration.
++- 	if crt.RenewBefore != nil && crt.RenewBefore.Duration >= duration {
++--		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", duration, crt.RenewBefore.Duration)))
++-+		el = append(el, field.Invalid(fldPath.Child("renewBefore"), crt.RenewBefore.Duration, fmt.Sprintf("certificate renewBefore must be less than duration, but duration is %s and renewBefore is %s", duration, crt.RenewBefore.Duration)))
++- 	}
++- 
++- 	// If spec.renewBeforePercentage is set, check that it's within the allowed
++-@@ -383,10 +383,10 @@ func ValidateDuration(crt *internalcmapi.CertificateSpec, fldPath *field.Path) f
++- 	if crt.RenewBeforePercentage != nil {
++- 		renewBefore := duration * time.Duration(100-*crt.RenewBeforePercentage) / 100
++- 		if renewBefore < cmapi.MinimumRenewBefore {
++--			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore greater than %s", cmapi.MinimumRenewBefore)))
++-+			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore of at least %s, but computed renewBefore is %s (percentage: %d%%)", cmapi.MinimumRenewBefore, renewBefore, *crt.RenewBeforePercentage)))
++- 		}
++- 		if renewBefore >= duration {
++--			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, "certificate renewBeforePercentage must result in a renewBefore less than duration"))
++-+			el = append(el, field.Invalid(fldPath.Child("renewBeforePercentage"), *crt.RenewBeforePercentage, fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore less than duration, but duration is %s and computed renewBefore is %s (percentage: %d%%)", duration, renewBefore, *crt.RenewBeforePercentage)))
++- 		}
++- 	}
++- 
++-diff --git a/internal/apis/certmanager/validation/certificate_test.go b/internal/apis/certmanager/validation/certificate_test.go
++-index 9064767c1..2508c14d8 100644
++---- a/internal/apis/certmanager/validation/certificate_test.go
++-+++ b/internal/apis/certmanager/validation/certificate_test.go
++-@@ -1011,7 +1011,7 @@ func TestValidateDuration(t *testing.T) {
++- 					IssuerRef:   validIssuerRef,
++- 				},
++- 			},
++--			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", cmapi.DefaultCertificateDuration, usefulDurations["ten years"].Duration))},
++-+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["ten years"].Duration, fmt.Sprintf("certificate renewBefore must be less than duration, but duration is %s and renewBefore is %s", cmapi.DefaultCertificateDuration, usefulDurations["ten years"].Duration))},
++- 		},
++- 		"renewBefore is bigger than the duration": {
++- 			cfg: &internalcmapi.Certificate{
++-@@ -1023,7 +1023,7 @@ func TestValidateDuration(t *testing.T) {
++- 					IssuerRef:   validIssuerRef,
++- 				},
++- 			},
++--			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", usefulDurations["one month"].Duration, usefulDurations["one year"].Duration))},
++-+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one year"].Duration, fmt.Sprintf("certificate renewBefore must be less than duration, but duration is %s and renewBefore is %s", usefulDurations["one month"].Duration, usefulDurations["one year"].Duration))},
++- 		},
++- 		"renewBefore is less than the minimum permitted value": {
++- 			cfg: &internalcmapi.Certificate{
++-@@ -1034,7 +1034,7 @@ func TestValidateDuration(t *testing.T) {
++- 					IssuerRef:   validIssuerRef,
++- 				},
++- 			},
++--			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore))},
++-+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBefore"), usefulDurations["one second"].Duration, fmt.Sprintf("certificate renewBefore must be at least %s, got %s", cmapi.MinimumRenewBefore, usefulDurations["one second"].Duration))},
++- 		},
++- 		"renewBefore and renewBeforePercentage both set": {
++- 			cfg: &internalcmapi.Certificate{
++-@@ -1081,7 +1081,7 @@ func TestValidateDuration(t *testing.T) {
++- 					IssuerRef:             validIssuerRef,
++- 				},
++- 			},
++--			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), "certificate renewBeforePercentage must result in a renewBefore less than duration")},
++-+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore less than duration, but duration is %s and computed renewBefore is %s (percentage: %d%%)", cmapi.DefaultCertificateDuration, cmapi.DefaultCertificateDuration, int32(0)))},
++- 		},
++- 		"renewBeforePercentage results in less than the minimum permitted value": {
++- 			cfg: &internalcmapi.Certificate{
++-@@ -1092,7 +1092,7 @@ func TestValidateDuration(t *testing.T) {
++- 					IssuerRef:             validIssuerRef,
++- 				},
++- 			},
++--			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(100), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore greater than %s", cmapi.MinimumRenewBefore))},
++-+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(100), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore of at least %s, but computed renewBefore is %s (percentage: %d%%)", cmapi.MinimumRenewBefore, time.Duration(0), int32(100)))},
++- 		},
++- 		"duration is less than the minimum permitted value": {
++- 			cfg: &internalcmapi.Certificate{
++-@@ -1104,7 +1104,7 @@ func TestValidateDuration(t *testing.T) {
++- 					IssuerRef:   validIssuerRef,
++- 				},
++- 			},
++--			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration))},
++-+			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be at least %s, got %s", cmapi.MinimumCertificateDuration, usefulDurations["half hour"].Duration))},
++- 		},
++- 	}
++- 	for n, s := range scenarios {
++diff --git a/pkg/controller/certificates/keymanager/keymanager_controller_test.go b/pkg/controller/certificates/keymanager/keymanager_controller_test.go
++index 51d640917..61a5bc91c 100644
++--- a/pkg/controller/certificates/keymanager/keymanager_controller_test.go
+++++ b/pkg/controller/certificates/keymanager/keymanager_controller_test.go
++@@ -515,64 +515,3 @@ func TestProcessItem(t *testing.T) {
++ 				ownedSecretWithName("testns", "fixed-name", "test", map[string][]byte{"tls.key": mustGenerateRSA(t, 2048)}),
+  			},
 --			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), "certificate renewBeforePercentage must result in a renewBefore less than duration")},
 -+			errs: []*field.Error{field.Invalid(fldPath.Child("renewBeforePercentage"), int32(0), fmt.Sprintf("certificate renewBeforePercentage must result in a renewBefore less than duration, but duration is %s and computed renewBefore is %s (percentage: %d%%)", cmapi.DefaultCertificateDuration, cmapi.DefaultCertificateDuration, int32(0)))},
 - 		},
@@ -98,9 +207,665 @@ index 874c146f4..e69de29bb 100644
 - 			},
 --			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration))},
 -+			errs: []*field.Error{field.Invalid(fldPath.Child("duration"), usefulDurations["half hour"].Duration, fmt.Sprintf("certificate duration must be at least %s, got %s", cmapi.MinimumCertificateDuration, usefulDurations["half hour"].Duration))},
-- 		},
-- 	}
+  		},
++-	}
++-	for name, test := range tests {
++-		t.Run(name, func(t *testing.T) {
++-			// Create and initialise a new unit test builder
++-			builder := &testpkg.Builder{
++-				T:               t,
++-				ExpectedEvents:  test.expectedEvents,
++-				ExpectedActions: test.expectedActions,
++-				StringGenerator: func(i int) string { return "notrandom" },
++-			}
++-			if test.certificate != nil {
++-				builder.CertManagerObjects = append(builder.CertManagerObjects, test.certificate)
++-			}
++-			if test.secrets != nil {
++-				builder.KubeObjects = append(builder.KubeObjects, test.secrets...)
++-			}
++-			for _, req := range test.requests {
++-				builder.CertManagerObjects = append(builder.CertManagerObjects, req)
++-			}
++-			builder.Init()
++-
++-			// Register informers used by the controller using the registration wrapper
++-			w := &controllerWrapper{}
++-			_, _, err := w.Register(builder.Context)
++-			if err != nil {
++-				t.Fatal(err)
++-			}
++-			// Start the informers and begin processing updates
++-			builder.Start()
++-			defer builder.Stop()
++-
++-			key := test.key
++-			if key == (types.NamespacedName{}) && test.certificate != nil {
++-				key = types.NamespacedName{
++-					Name:      test.certificate.Name,
++-					Namespace: test.certificate.Namespace,
++-				}
++-			}
++-
++-			// Call ProcessItem
++-			err = w.controller.ProcessItem(t.Context(), key)
++-			switch {
++-			case err != nil:
++-				if test.err != err.Error() {
++-					t.Errorf("error text did not match, got=%s, exp=%s", err.Error(), test.err)
++-				}
++-			default:
++-				if test.err != "" {
++-					t.Errorf("got no error but expected: %s", test.err)
++-				}
++-			}
++-
++-			if err := builder.AllEventsCalled(); err != nil {
++-				builder.T.Error(err)
++-			}
++-			if err := builder.AllActionsExecuted(); err != nil {
++-				builder.T.Error(err)
++-			}
++-		})
++-	}
++-}
++diff --git a/test/unit/gen/certificate.go b/test/unit/gen/certificate.go
++index 94dbf2570..4b7ba47b4 100644
++--- a/test/unit/gen/certificate.go
+++++ b/test/unit/gen/certificate.go
++@@ -119,6 +119,12 @@ func SetCertificateKeyEncoding(keyEncoding v1.PrivateKeyEncoding) CertificateMod
+  	}
 - 	for n, s := range scenarios {
++ }
++ 
+++func SetCertificateRotationPolicy(rotationPolicy v1.PrivateKeyRotationPolicy) CertificateModifier {
+++	return func(crt *v1.Certificate) {
+++		crt.Spec.PrivateKey.RotationPolicy = rotationPolicy
+++	}
+++}
+++
++ func SetCertificateSecretName(secretName string) CertificateModifier {
++ 	return func(crt *v1.Certificate) {
++ 		crt.Spec.SecretName = secretName
+diff --git a/pkg/controller/certificates/keymanager/fixtures_test.go b/pkg/controller/certificates/keymanager/fixtures_test.go
+new file mode 100644
+index 000000000..71efa939b
+--- /dev/null
++++ b/pkg/controller/certificates/keymanager/fixtures_test.go
+@@ -0,0 +1,572 @@
++/*
++Copyright 2020 The cert-manager Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package keymanager
++
++import (
++	"crypto"
++	"testing"
++
++	corev1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/runtime"
++	"k8s.io/apimachinery/pkg/types"
++	coretesting "k8s.io/client-go/testing"
++
++	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
++	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
++	testpkg "github.com/cert-manager/cert-manager/pkg/controller/test"
++	"github.com/cert-manager/cert-manager/pkg/util/pki"
++	"github.com/cert-manager/cert-manager/test/unit/gen"
++)
++
++const (
++	testNamespace  = "testns"
++	testCertName   = "test-cert"
++	testSecretName = "test-secret"
++)
++
++func new(s string) *string {
++	return &s
++}
++
++func mustGeneratePKCS8RSA(t *testing.T, keySize int) []byte {
++	t.Helper()
++	pk, err := pki.GenerateRSAPrivateKey(keySize)
++	if err != nil {
++		t.Fatal(err)
++	}
++	d, err := pki.EncodePKCS8PrivateKey(pk)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return d
++}
++
++func mustGeneratePKCS8ECDSA(t *testing.T, keySize int) []byte {
++	t.Helper()
++	pk, err := pki.GenerateECPrivateKey(keySize)
++	if err != nil {
++		t.Fatal(err)
++	}
++	d, err := pki.EncodePKCS8PrivateKey(pk)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return d
++}
++
++func mustGeneratePKCS8Ed25519(t *testing.T) []byte {
++	t.Helper()
++	pk, err := pki.GenerateEd25519PrivateKey()
++	if err != nil {
++		t.Fatal(err)
++	}
++	d, err := pki.EncodePKCS8PrivateKey(pk)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return d
++}
++
++func decodePrivateKey(t *testing.T, data []byte) crypto.Signer {
++	t.Helper()
++	pk, err := pki.DecodePrivateKeyBytes(data)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return pk
++}
++
++func newSecret(name string, data map[string][]byte) *corev1.Secret {
++	return &corev1.Secret{
++		ObjectMeta: metav1.ObjectMeta{
++			Namespace: testNamespace,
++			Name:      name,
++		},
++		Data: data,
++	}
++}
++
++func newOwnedNextPrivateKeySecret(name, owner string, data map[string][]byte) *corev1.Secret {
++	return &corev1.Secret{
++		ObjectMeta: metav1.ObjectMeta{
++			Namespace: testNamespace,
++			Name:      name,
++			Labels: map[string]string{
++				cmapi.IsNextPrivateKeySecretLabelKey:      "true",
++				cmapi.PartOfCertManagerControllerLabelKey: "true",
++			},
++			OwnerReferences: []metav1.OwnerReference{
++				*metav1.NewControllerRef(&cmapi.Certificate{
++					ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: owner, UID: types.UID(owner)},
++				}, certificateGvk),
++			},
++		},
++		Data: data,
++	}
++}
++
++type KeyManagerFixture struct {
++	Certificate *cmapi.Certificate
++	Secrets     []runtime.Object
++}
++
++func (f *KeyManagerFixture) WithCertificate(crt *cmapi.Certificate) *KeyManagerFixture {
++	f.Certificate = crt
++	return f
++}
++
++func (f *KeyManagerFixture) WithSecrets(secrets ...runtime.Object) *KeyManagerFixture {
++	f.Secrets = secrets
++	return f
++}
++
++type KeyManagerExpectedActions struct {
++	Actions []testpkg.Action
++	Events  []string
++}
++
++func (e *KeyManagerExpectedActions) WithActions(actions ...testpkg.Action) *KeyManagerExpectedActions {
++	e.Actions = actions
++	return e
++}
++
++func (e *KeyManagerExpectedActions) WithEvents(events ...string) *KeyManagerExpectedActions {
++	e.Events = events
++	return e
++}
++
++type PrivateKeyRotationTestCase struct {
++	Name            string
++	Fixture         *KeyManagerFixture
++	ExpectedActions *KeyManagerExpectedActions
++	Verify          func(t *testing.T, b *testpkg.Builder)
++}
++
++func newIssuingCertificate(name string, mods ...gen.CertificateModifier) *cmapi.Certificate {
++	baseMods := []gen.CertificateModifier{
++		gen.SetCertificateNamespace(testNamespace),
++		gen.SetCertificateSecretName(testSecretName),
++		gen.SetCertificateStatusCondition(cmapi.CertificateCondition{
++			Type:   cmapi.CertificateConditionIssuing,
++			Status: cmmeta.ConditionTrue,
++		}),
++	}
++	return gen.Certificate(name, append(baseMods, mods...)...)
++}
++
++func newIssuingCertificateWithUID(name string, mods ...gen.CertificateModifier) *cmapi.Certificate {
++	baseMods := []gen.CertificateModifier{
++		gen.SetCertificateNamespace(testNamespace),
++		gen.SetCertificateUID(types.UID(name)),
++		gen.SetCertificateSecretName(testSecretName),
++		gen.SetCertificateStatusCondition(cmapi.CertificateCondition{
++			Type:   cmapi.CertificateConditionIssuing,
++			Status: cmmeta.ConditionTrue,
++		}),
++	}
++	return gen.Certificate(name, append(baseMods, mods...)...)
++}
++
++func expectedCreateActionForSecret(name string, data map[string][]byte) testpkg.Action {
++	return testpkg.NewCustomMatch(coretesting.NewCreateAction(
++		corev1.SchemeGroupVersion.WithResource("secrets"),
++		testNamespace,
++		&corev1.Secret{
++			ObjectMeta: metav1.ObjectMeta{
++				Namespace:       testNamespace,
++				Name:            name,
++				Labels:          map[string]string{cmapi.IsNextPrivateKeySecretLabelKey: "true", cmapi.PartOfCertManagerControllerLabelKey: "true"},
++				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&cmapi.Certificate{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testCertName}}, certificateGvk)},
++			},
++			Data: data,
++		},
++	), relaxedSecretMatcher)
++}
++
++func expectedCreateActionForSecretWithGenerateName(data map[string][]byte) testpkg.Action {
++	return testpkg.NewCustomMatch(coretesting.NewCreateAction(
++		corev1.SchemeGroupVersion.WithResource("secrets"),
++		testNamespace,
++		&corev1.Secret{
++			ObjectMeta: metav1.ObjectMeta{
++				Namespace:       testNamespace,
++				GenerateName:    testCertName + "-",
++				Labels:          map[string]string{cmapi.IsNextPrivateKeySecretLabelKey: "true", cmapi.PartOfCertManagerControllerLabelKey: "true"},
++				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&cmapi.Certificate{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: testCertName}}, certificateGvk)},
++			},
++			Data: data,
++		},
++	), relaxedSecretMatcher)
++}
++
++func expectedUpdateStatusAction(nextPrivateKeySecretName *string, mods ...gen.CertificateModifier) testpkg.Action {
++	baseMods := []gen.CertificateModifier{
++		gen.SetCertificateNamespace(testNamespace),
++		gen.SetCertificateSecretName(testSecretName),
++		gen.SetCertificateStatusCondition(cmapi.CertificateCondition{
++			Type:   cmapi.CertificateConditionIssuing,
++			Status: cmmeta.ConditionTrue,
++		}),
++	}
++	crt := gen.Certificate(testCertName, append(baseMods, mods...)...)
++	if nextPrivateKeySecretName != nil {
++		crt.Status.NextPrivateKeySecretName = nextPrivateKeySecretName
++	}
++	return testpkg.NewAction(coretesting.NewUpdateSubresourceAction(
++		cmapi.SchemeGroupVersion.WithResource("certificates"),
++		"status",
++		testNamespace,
++		crt,
++	))
++}
++
++func expectedGetCertificateAction() testpkg.Action {
++	return testpkg.NewAction(coretesting.NewGetAction(
++		cmapi.SchemeGroupVersion.WithResource("certificates"),
++		testNamespace,
++		testCertName,
++	))
++}
++
++func FixtureSecretMissingRotationPolicyNever(t *testing.T) *PrivateKeyRotationTestCase {
++	t.Helper()
++	return &PrivateKeyRotationTestCase{
++		Name: "secret_missing_rotation_policy_never",
++		Fixture: (&KeyManagerFixture{}).
++			WithCertificate(newIssuingCertificate(testCertName,
++				gen.SetCertificateRotationPolicy(cmapi.RotationPolicyNever),
++			)),
++		ExpectedActions: (&KeyManagerExpectedActions{}).
++			WithActions(
++				expectedUpdateStatusAction(new("test-cert-notrandom"),
++					gen.SetCertificateRotationPolicy(cmapi.RotationPolicyNever),
++				),
++				expectedCreateActionForSecretWithGenerateName(map[string][]byte{"tls.key": nil}),
++			).
++			WithEvents("Normal Generated Stored new private key in temporary Secret resource \"test-cert-notrandom\""),
++		Verify: func(t *testing.T, b *testpkg.Builder) {
++			t.Helper()
++			crt, err := b.FakeCMClient().CertmanagerV1().Certificates(testNamespace).Get(t.Context(), testCertName, metav1.GetOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error getting certificate: %v", err)
++			}
++			if crt.Status.NextPrivateKeySecretName == nil {
++				t.Fatal("expected NextPrivateKeySecretName to be set, got nil")
++			}
++			t.Logf("NextPrivateKeySecretName: %s", *crt.Status.NextPrivateKeySecretName)
++
++			secrets, err := b.FakeKubeClient().CoreV1().Secrets(testNamespace).List(t.Context(), metav1.ListOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error listing secrets: %v", err)
++			}
++			if len(secrets.Items) != 1 {
++				t.Fatalf("expected 1 secret, got %d", len(secrets.Items))
++			}
++			secret := secrets.Items[0]
++			if secret.Data == nil || len(secret.Data[corev1.TLSPrivateKeyKey]) == 0 {
++				t.Fatal("expected secret to contain tls.key data")
++			}
++			pk := decodePrivateKey(t, secret.Data[corev1.TLSPrivateKeyKey])
++			violations := pki.PrivateKeyMatchesSpec(pk, cmapi.CertificateSpec{
++				PrivateKey: &cmapi.CertificatePrivateKey{},
++			})
++			if len(violations) > 0 {
++				t.Fatalf("expected private key to match spec, got violations: %v", violations)
++			}
++		},
++	}
++}
++
++func FixtureSecretAlgorithmMismatchRotationPolicyNever(t *testing.T) *PrivateKeyRotationTestCase {
++	t.Helper()
++	ecdsaKey := mustGeneratePKCS8ECDSA(t, pki.ECCurve256)
++	return &PrivateKeyRotationTestCase{
++		Name: "secret_algorithm_mismatch_rotation_policy_never",
++		Fixture: (&KeyManagerFixture{}).
++			WithCertificate(newIssuingCertificate(testCertName,
++				gen.SetCertificateRotationPolicy(cmapi.RotationPolicyNever),
++				gen.SetCertificateKeyAlgorithm(cmapi.RSAKeyAlgorithm),
++				gen.SetCertificateKeySize(2048),
++			)).
++			WithSecrets(newSecret(testSecretName, map[string][]byte{
++				corev1.TLSPrivateKeyKey: ecdsaKey,
++			})),
++		ExpectedActions: (&KeyManagerExpectedActions{}).
++			WithEvents("Warning CannotRegenerateKey User intervention required: existing private key in Secret \"test-secret\" does not match requirements on Certificate resource, mismatching fields: [spec.privateKey.algorithm], but cert-manager cannot create new private key as the Certificate's .spec.privateKey.rotationPolicy is unset or set to Never. To allow cert-manager to create a new private key you can set .spec.privateKey.rotationPolicy to 'Always' (this will result in the private key being regenerated every time a cert is renewed) "),
++		Verify: func(t *testing.T, b *testpkg.Builder) {
++			t.Helper()
++			crt, err := b.FakeCMClient().CertmanagerV1().Certificates(testNamespace).Get(t.Context(), testCertName, metav1.GetOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error getting certificate: %v", err)
++			}
++			if crt.Status.NextPrivateKeySecretName != nil {
++				t.Fatalf("expected NextPrivateKeySecretName to be nil, got %s", *crt.Status.NextPrivateKeySecretName)
++			}
++
++			secrets, err := b.FakeKubeClient().CoreV1().Secrets(testNamespace).List(t.Context(), metav1.ListOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error listing secrets: %v", err)
++			}
++			nextPKSecrets := 0
++			for _, s := range secrets.Items {
++				if s.Labels[cmapi.IsNextPrivateKeySecretLabelKey] == "true" {
++					nextPKSecrets++
++				}
++			}
++			if nextPKSecrets > 0 {
++				t.Fatalf("expected no next private key secrets to be created, got %d", nextPKSecrets)
++			}
++		},
++	}
++}
++
++func FixtureSecretMatchesRotationPolicyNever(t *testing.T) *PrivateKeyRotationTestCase {
++	t.Helper()
++	rsaKey := mustGeneratePKCS8RSA(t, 2048)
++	return &PrivateKeyRotationTestCase{
++		Name: "secret_matches_rotation_policy_never",
++		Fixture: (&KeyManagerFixture{}).
++			WithCertificate(newIssuingCertificateWithUID(testCertName,
++				gen.SetCertificateRotationPolicy(cmapi.RotationPolicyNever),
++				gen.SetCertificateKeyAlgorithm(cmapi.RSAKeyAlgorithm),
++				gen.SetCertificateKeySize(2048),
++			)).
++			WithSecrets(newSecret(testSecretName, map[string][]byte{
++				corev1.TLSPrivateKeyKey: rsaKey,
++			})),
++		ExpectedActions: (&KeyManagerExpectedActions{}).
++			WithActions(
++				expectedUpdateStatusAction(new("test-cert-notrandom"),
++					gen.SetCertificateRotationPolicy(cmapi.RotationPolicyNever),
++					gen.SetCertificateKeyAlgorithm(cmapi.RSAKeyAlgorithm),
++					gen.SetCertificateKeySize(2048),
++				),
++				expectedCreateActionForSecretWithGenerateName(map[string][]byte{"tls.key": nil}),
++			).
++			WithEvents("Normal Reused Reusing private key stored in existing Secret resource \"test-secret\""),
++		Verify: func(t *testing.T, b *testpkg.Builder) {
++			t.Helper()
++			crt, err := b.FakeCMClient().CertmanagerV1().Certificates(testNamespace).Get(t.Context(), testCertName, metav1.GetOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error getting certificate: %v", err)
++			}
++			if crt.Status.NextPrivateKeySecretName == nil {
++				t.Fatal("expected NextPrivateKeySecretName to be set, got nil")
++			}
++
++			secrets, err := b.FakeKubeClient().CoreV1().Secrets(testNamespace).List(t.Context(), metav1.ListOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error listing secrets: %v", err)
++			}
++			nextPKSecrets := 0
++			var nextPKSecret corev1.Secret
++			for _, s := range secrets.Items {
++				if s.Labels[cmapi.IsNextPrivateKeySecretLabelKey] == "true" {
++					nextPKSecrets++
++					nextPKSecret = s
++				}
++			}
++			if nextPKSecrets != 1 {
++				t.Fatalf("expected 1 next private key secret, got %d", nextPKSecrets)
++			}
++			if nextPKSecret.Data == nil || len(nextPKSecret.Data[corev1.TLSPrivateKeyKey]) == 0 {
++				t.Fatal("expected next private key secret to contain tls.key data")
++			}
++			pk := decodePrivateKey(t, nextPKSecret.Data[corev1.TLSPrivateKeyKey])
++			violations := pki.PrivateKeyMatchesSpec(pk, cmapi.CertificateSpec{
++				PrivateKey: &cmapi.CertificatePrivateKey{
++					Algorithm: cmapi.RSAKeyAlgorithm,
++					Size:      2048,
++				},
++			})
++			if len(violations) > 0 {
++				t.Fatalf("expected re-used private key to match spec, got violations: %v", violations)
++			}
++		},
++	}
++}
++
++func FixtureRotationPolicyAlways(t *testing.T) *PrivateKeyRotationTestCase {
++	t.Helper()
++	return &PrivateKeyRotationTestCase{
++		Name: "rotation_policy_always",
++		Fixture: (&KeyManagerFixture{}).
++			WithCertificate(newIssuingCertificate(testCertName,
++				gen.SetCertificateRotationPolicy(cmapi.RotationPolicyAlways),
++				gen.SetCertificateKeyAlgorithm(cmapi.RSAKeyAlgorithm),
++				gen.SetCertificateKeySize(2048),
++			)),
++		ExpectedActions: (&KeyManagerExpectedActions{}).
++			WithActions(
++				expectedUpdateStatusAction(new("test-cert-notrandom"),
++					gen.SetCertificateRotationPolicy(cmapi.RotationPolicyAlways),
++					gen.SetCertificateKeyAlgorithm(cmapi.RSAKeyAlgorithm),
++					gen.SetCertificateKeySize(2048),
++				),
++				expectedCreateActionForSecretWithGenerateName(map[string][]byte{"tls.key": nil}),
++			).
++			WithEvents("Normal Generated Stored new private key in temporary Secret resource \"test-cert-notrandom\""),
++		Verify: func(t *testing.T, b *testpkg.Builder) {
++			t.Helper()
++			crt, err := b.FakeCMClient().CertmanagerV1().Certificates(testNamespace).Get(t.Context(), testCertName, metav1.GetOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error getting certificate: %v", err)
++			}
++			if crt.Status.NextPrivateKeySecretName == nil {
++				t.Fatal("expected NextPrivateKeySecretName to be set, got nil")
++			}
++
++			secrets, err := b.FakeKubeClient().CoreV1().Secrets(testNamespace).List(t.Context(), metav1.ListOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error listing secrets: %v", err)
++			}
++			if len(secrets.Items) != 1 {
++				t.Fatalf("expected 1 secret, got %d", len(secrets.Items))
++			}
++			secret := secrets.Items[0]
++			if secret.Data == nil || len(secret.Data[corev1.TLSPrivateKeyKey]) == 0 {
++				t.Fatal("expected secret to contain tls.key data")
++			}
++			pk := decodePrivateKey(t, secret.Data[corev1.TLSPrivateKeyKey])
++			violations := pki.PrivateKeyMatchesSpec(pk, cmapi.CertificateSpec{
++				PrivateKey: &cmapi.CertificatePrivateKey{
++					Algorithm: cmapi.RSAKeyAlgorithm,
++					Size:      2048,
++				},
++			})
++			if len(violations) > 0 {
++				t.Fatalf("expected private key to match spec, got violations: %v", violations)
++			}
++		},
++	}
++}
++
++func FixtureRotationPolicyAlwaysWithExistingSecret(t *testing.T) *PrivateKeyRotationTestCase {
++	t.Helper()
++	existingKey := mustGeneratePKCS8ECDSA(t, pki.ECCurve256)
++	return &PrivateKeyRotationTestCase{
++		Name: "rotation_policy_always_with_existing_secret",
++		Fixture: (&KeyManagerFixture{}).
++			WithCertificate(newIssuingCertificate(testCertName,
++				gen.SetCertificateRotationPolicy(cmapi.RotationPolicyAlways),
++				gen.SetCertificateKeyAlgorithm(cmapi.RSAKeyAlgorithm),
++				gen.SetCertificateKeySize(2048),
++			)).
++			WithSecrets(newSecret(testSecretName, map[string][]byte{
++				corev1.TLSPrivateKeyKey: existingKey,
++			})),
++		ExpectedActions: (&KeyManagerExpectedActions{}).
++			WithActions(
++				expectedUpdateStatusAction(new("test-cert-notrandom"),
++					gen.SetCertificateRotationPolicy(cmapi.RotationPolicyAlways),
++					gen.SetCertificateKeyAlgorithm(cmapi.RSAKeyAlgorithm),
++					gen.SetCertificateKeySize(2048),
++				),
++				expectedCreateActionForSecretWithGenerateName(map[string][]byte{"tls.key": nil}),
++			).
++			WithEvents("Normal Generated Stored new private key in temporary Secret resource \"test-cert-notrandom\""),
++		Verify: func(t *testing.T, b *testpkg.Builder) {
++			t.Helper()
++			crt, err := b.FakeCMClient().CertmanagerV1().Certificates(testNamespace).Get(t.Context(), testCertName, metav1.GetOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error getting certificate: %v", err)
++			}
++			if crt.Status.NextPrivateKeySecretName == nil {
++				t.Fatal("expected NextPrivateKeySecretName to be set, got nil")
++			}
++
++			secrets, err := b.FakeKubeClient().CoreV1().Secrets(testNamespace).List(t.Context(), metav1.ListOptions{})
++			if err != nil {
++				t.Fatalf("unexpected error listing secrets: %v", err)
++			}
++			nextPKSecrets := 0
++			var nextPKSecret corev1.Secret
++			for _, s := range secrets.Items {
++				if s.Labels[cmapi.IsNextPrivateKeySecretLabelKey] == "true" {
++					nextPKSecrets++
++					nextPKSecret = s
++				}
++			}
++			if nextPKSecrets != 1 {
++				t.Fatalf("expected 1 next private key secret, got %d", nextPKSecrets)
++			}
++			if nextPKSecret.Data == nil || len(nextPKSecret.Data[corev1.TLSPrivateKeyKey]) == 0 {
++				t.Fatal("expected next private key secret to contain tls.key data")
++			}
++			pk := decodePrivateKey(t, nextPKSecret.Data[corev1.TLSPrivateKeyKey])
++			violations := pki.PrivateKeyMatchesSpec(pk, cmapi.CertificateSpec{
++				PrivateKey: &cmapi.CertificatePrivateKey{
++					Algorithm: cmapi.RSAKeyAlgorithm,
++					Size:      2048,
++				},
++			})
++			if len(violations) > 0 {
++				t.Fatalf("expected new private key to match spec, got violations: %v", violations)
++			}
++		},
++	}
++}
++
++func AllPrivateKeyRotationFixtures(t *testing.T) []*PrivateKeyRotationTestCase {
++	t.Helper()
++	return []*PrivateKeyRotationTestCase{
++		FixtureSecretMissingRotationPolicyNever(t),
++		FixtureSecretAlgorithmMismatchRotationPolicyNever(t),
++		FixtureSecretMatchesRotationPolicyNever(t),
++		FixtureRotationPolicyAlways(t),
++		FixtureRotationPolicyAlwaysWithExistingSecret(t),
++	}
++}
++
++func RunPrivateKeyRotationTest(t *testing.T, tc *PrivateKeyRotationTestCase) {
++	t.Helper()
++	t.Run(tc.Name, func(t *testing.T) {
++		builder := &testpkg.Builder{
++			T:               t,
++			KubeObjects:     tc.Fixture.Secrets,
++			CertManagerObjects: []runtime.Object{tc.Fixture.Certificate},
++			ExpectedActions: tc.ExpectedActions.Actions,
++			ExpectedEvents:  tc.ExpectedActions.Events,
++			StringGenerator: func(i int) string { return "notrandom" },
++		}
++		builder.Init()
++
++		w := &controllerWrapper{}
++		_, _, err := w.Register(builder.Context)
++		if err != nil {
++			t.Fatal(err)
++		}
++
++		builder.Start()
++		defer builder.Stop()
++
++		err = w.controller.ProcessItem(t.Context(), types.NamespacedName{
++			Namespace: testNamespace,
++			Name:      testCertName,
++		})
++		if err != nil {
++			t.Errorf("unexpected error: %v", err)
++		}
++
++		builder.CheckAndFinish(err)
++
++		if tc.Verify != nil {
++			tc.Verify(t, builder)
++		}
++	})
++}
+\ No newline at end of file
 diff --git a/pkg/controller/certificates/keymanager/keymanager_controller_test.go b/pkg/controller/certificates/keymanager/keymanager_controller_test.go
 index 51d640917..61a5bc91c 100644
 --- a/pkg/controller/certificates/keymanager/keymanager_controller_test.go
