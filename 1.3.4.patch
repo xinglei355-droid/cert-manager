@@ -1,0 +1,69 @@
+diff --git a/internal/apis/certmanager/validation/certificate_test.go b/internal/apis/certmanager/validation/certificate_test.go
+index 9064767c1..9d6f6ce9b 100644
+--- a/internal/apis/certmanager/validation/certificate_test.go
++++ b/internal/apis/certmanager/validation/certificate_test.go
+@@ -934,6 +934,64 @@ func TestValidateCertificate(t *testing.T) {
+ 				},
+ 			},
+ 		},
++		"certificate with duration less than minimum permitted value": {
++			cfg: &internalcmapi.Certificate{
++				Spec: internalcmapi.CertificateSpec{
++					Duration:   &metav1.Duration{Duration: time.Minute * 30},
++					CommonName: "testcn",
++					SecretName: "abc",
++					IssuerRef:  validIssuerRef,
++				},
++			},
++			a: someAdmissionRequest,
++			errs: []*field.Error{
++				field.Invalid(fldPath.Child("duration"), time.Minute*30, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)),
++			},
++		},
++		"certificate with renewBefore less than minimum permitted value": {
++			cfg: &internalcmapi.Certificate{
++				Spec: internalcmapi.CertificateSpec{
++					RenewBefore: &metav1.Duration{Duration: time.Second},
++					CommonName:  "testcn",
++					SecretName:  "abc",
++					IssuerRef:   validIssuerRef,
++				},
++			},
++			a: someAdmissionRequest,
++			errs: []*field.Error{
++				field.Invalid(fldPath.Child("renewBefore"), time.Second, fmt.Sprintf("certificate renewBefore must be greater than %s", cmapi.MinimumRenewBefore)),
++			},
++		},
++		"certificate with renewBefore greater than or equal to duration": {
++			cfg: &internalcmapi.Certificate{
++				Spec: internalcmapi.CertificateSpec{
++					Duration:    &metav1.Duration{Duration: time.Hour * 24},
++					RenewBefore: &metav1.Duration{Duration: time.Hour * 24},
++					CommonName:  "testcn",
++					SecretName:  "abc",
++					IssuerRef:   validIssuerRef,
++				},
++			},
++			a: someAdmissionRequest,
++			errs: []*field.Error{
++				field.Invalid(fldPath.Child("renewBefore"), time.Hour*24, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", time.Hour*24, time.Hour*24)),
++			},
++		},
++		"certificate with renewBefore greater than duration": {
++			cfg: &internalcmapi.Certificate{
++				Spec: internalcmapi.CertificateSpec{
++					Duration:    &metav1.Duration{Duration: time.Hour},
++					RenewBefore: &metav1.Duration{Duration: time.Hour * 2},
++					CommonName:  "testcn",
++					SecretName:  "abc",
++					IssuerRef:   validIssuerRef,
++				},
++			},
++			a: someAdmissionRequest,
++			errs: []*field.Error{
++				field.Invalid(fldPath.Child("renewBefore"), time.Hour*2, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", time.Hour, time.Hour*2)),
++			},
++		},
+ 	}
+ 	for n, s := range scenarios {
+ 		t.Run(n, func(t *testing.T) {
