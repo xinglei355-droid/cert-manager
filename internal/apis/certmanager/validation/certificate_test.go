@@ -945,6 +945,73 @@ func TestValidateCertificate(t *testing.T) {
 	}
 }
 
+func TestValidateCertificateWebhookFieldPaths(t *testing.T) {
+	fldPath := field.NewPath("spec")
+	scenarios := map[string]struct {
+		cfg  *internalcmapi.Certificate
+		errs []*field.Error
+	}{
+		"duration uses spec.duration field path": {
+			cfg: &internalcmapi.Certificate{
+				Spec: internalcmapi.CertificateSpec{
+					Duration:    &metav1.Duration{Duration: time.Minute * 30},
+					RenewBefore: &metav1.Duration{Duration: time.Minute * 10},
+					CommonName:  "testcn",
+					SecretName:  "abc",
+					IssuerRef:   validIssuerRef,
+				},
+			},
+			errs: []*field.Error{
+				field.Invalid(fldPath.Child("duration"), time.Minute*30, fmt.Sprintf("certificate duration must be greater than %s", cmapi.MinimumCertificateDuration)),
+			},
+		},
+		"renewBefore uses spec.renewBefore field path": {
+			cfg: &internalcmapi.Certificate{
+				Spec: internalcmapi.CertificateSpec{
+					Duration:    &metav1.Duration{Duration: time.Hour * 24 * 30},
+					RenewBefore: &metav1.Duration{Duration: time.Hour * 24 * 365},
+					CommonName:  "testcn",
+					SecretName:  "abc",
+					IssuerRef:   validIssuerRef,
+				},
+			},
+			errs: []*field.Error{
+				field.Invalid(fldPath.Child("renewBefore"), time.Hour*24*365, fmt.Sprintf("certificate duration %s must be greater than renewBefore %s", time.Hour*24*30, time.Hour*24*365)),
+			},
+		},
+		"secretName uses spec.secretName field path": {
+			cfg: &internalcmapi.Certificate{
+				Spec: internalcmapi.CertificateSpec{
+					CommonName: "testcn",
+					IssuerRef:  validIssuerRef,
+				},
+			},
+			errs: []*field.Error{
+				field.Required(fldPath.Child("secretName"), "must be specified"),
+			},
+		},
+		"issuerRef uses spec.issuerRef.name field path": {
+			cfg: &internalcmapi.Certificate{
+				Spec: internalcmapi.CertificateSpec{
+					CommonName: "testcn",
+					SecretName: "abc",
+				},
+			},
+			errs: []*field.Error{
+				field.Required(fldPath.Child("issuerRef", "name"), "must be specified"),
+			},
+		},
+	}
+
+	for name, scenario := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			errs, warnings := ValidateCertificate(someAdmissionRequest, scenario.cfg)
+			assert.ElementsMatch(t, scenario.errs, errs)
+			assert.Empty(t, warnings)
+		})
+	}
+}
+
 func TestValidateDuration(t *testing.T) {
 	usefulDurations := map[string]*metav1.Duration{
 		"one second":  {Duration: time.Second},
