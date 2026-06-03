@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	config "github.com/cert-manager/cert-manager/internal/apis/config/controller"
+	validation "github.com/cert-manager/cert-manager/internal/apis/config/controller/validation"
 	defaults "github.com/cert-manager/cert-manager/internal/apis/config/controller/v1alpha1"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -82,6 +83,89 @@ func TestEnabledControllers(t *testing.T) {
 			if !got.Equal(test.expEnabled) {
 				t.Errorf("got unexpected enabled controllers, exp=%v got=%v",
 					sets.List(test.expEnabled), sets.List(got))
+			}
+		})
+	}
+}
+
+func TestValidateControllerConfiguration(t *testing.T) {
+	tests := map[string]struct {
+		config       *config.ControllerConfiguration
+		expectErrors bool
+	}{
+		"default valid config should pass validation": {
+			config: func() *config.ControllerConfiguration {
+				cfg, _ := NewControllerConfiguration()
+				return cfg
+			}(),
+			expectErrors: false,
+		},
+		"valid namespace should pass validation": {
+			config: func() *config.ControllerConfiguration {
+				cfg, _ := NewControllerConfiguration()
+				cfg.Namespace = "valid-namespace"
+				return cfg
+			}(),
+			expectErrors: false,
+		},
+		"invalid namespace should fail validation": {
+			config: func() *config.ControllerConfiguration {
+				cfg, _ := NewControllerConfiguration()
+				cfg.Namespace = "INVALID_NAMESPACE!!"
+				return cfg
+			}(),
+			expectErrors: true,
+		},
+		"valid leader election namespace should pass validation": {
+			config: func() *config.ControllerConfiguration {
+				cfg, _ := NewControllerConfiguration()
+				cfg.LeaderElectionConfig.Enabled = true
+				cfg.LeaderElectionConfig.Namespace = "valid-leader-ns"
+				return cfg
+			}(),
+			expectErrors: false,
+		},
+		"invalid leader election namespace should fail validation": {
+			config: func() *config.ControllerConfiguration {
+				cfg, _ := NewControllerConfiguration()
+				cfg.LeaderElectionConfig.Enabled = true
+				cfg.LeaderElectionConfig.Namespace = "INVALID_LEADER_NS!!"
+				return cfg
+			}(),
+			expectErrors: true,
+		},
+		"zero concurrent workers should fail validation": {
+			config: func() *config.ControllerConfiguration {
+				cfg, _ := NewControllerConfiguration()
+				cfg.NumberOfConcurrentWorkers = 0
+				return cfg
+			}(),
+			expectErrors: true,
+		},
+		"negative concurrent workers should fail validation": {
+			config: func() *config.ControllerConfiguration {
+				cfg, _ := NewControllerConfiguration()
+				cfg.NumberOfConcurrentWorkers = -5
+				return cfg
+			}(),
+			expectErrors: true,
+		},
+		"one concurrent worker should pass validation": {
+			config: func() *config.ControllerConfiguration {
+				cfg, _ := NewControllerConfiguration()
+				cfg.NumberOfConcurrentWorkers = 1
+				return cfg
+			}(),
+			expectErrors: false,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			errs := validation.ValidateControllerConfiguration(test.config, nil)
+			hasErrors := len(errs) > 0
+			if hasErrors != test.expectErrors {
+				t.Errorf("expected errors=%v, got errors=%v, errs=%v", test.expectErrors, hasErrors, errs)
 			}
 		})
 	}

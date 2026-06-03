@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	logsapi "k8s.io/component-base/logs/api/v1"
 
@@ -55,6 +56,24 @@ func ValidateControllerConfiguration(cfg *config.ControllerConfiguration, fldPat
 
 	if float32(cfg.KubernetesAPIBurst) < cfg.KubernetesAPIQPS {
 		allErrors = append(allErrors, field.Invalid(fldPath.Child("kubernetesAPIBurst"), cfg.KubernetesAPIBurst, "must be higher or equal to kubernetesAPIQPS"))
+	}
+
+	if cfg.Namespace != "" {
+		errs := validation.IsDNS1123Label(cfg.Namespace)
+		if len(errs) > 0 {
+			allErrors = append(allErrors, field.Invalid(fldPath.Child("namespace"), cfg.Namespace, "must be a valid namespace: "+strings.Join(errs, ", ")))
+		}
+	}
+
+	if cfg.LeaderElectionConfig.Enabled && cfg.LeaderElectionConfig.Namespace != "" {
+		errs := validation.IsDNS1123Label(cfg.LeaderElectionConfig.Namespace)
+		if len(errs) > 0 {
+			allErrors = append(allErrors, field.Invalid(fldPath.Child("leaderElectionConfig").Child("namespace"), cfg.LeaderElectionConfig.Namespace, "must be a valid namespace: "+strings.Join(errs, ", ")))
+		}
+	}
+
+	if cfg.NumberOfConcurrentWorkers <= 0 {
+		allErrors = append(allErrors, field.Invalid(fldPath.Child("numberOfConcurrentWorkers"), cfg.NumberOfConcurrentWorkers, "must be greater than 0"))
 	}
 
 	for i, server := range cfg.ACMEHTTP01Config.SolverNameservers {

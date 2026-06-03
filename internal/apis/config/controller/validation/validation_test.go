@@ -53,11 +53,146 @@ func TestValidateControllerConfiguration(t *testing.T) {
 				IngressShimConfig: config.IngressShimConfig{
 					DefaultIssuerKind: "Issuer",
 				},
-				KubernetesAPIBurst:  1,
-				KubernetesAPIQPS:    1,
-				PEMSizeLimitsConfig: validPEMSizeLimitsConfig(),
+				KubernetesAPIBurst:          1,
+				KubernetesAPIQPS:            1,
+				NumberOfConcurrentWorkers:   1,
+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
 			},
 			nil,
+		},
+		{
+			"with valid namespace",
+			&config.ControllerConfiguration{
+				Logging: logsapi.LoggingConfiguration{
+					Format: "text",
+				},
+				IngressShimConfig: config.IngressShimConfig{
+					DefaultIssuerKind: "Issuer",
+				},
+				KubernetesAPIBurst:          1,
+				KubernetesAPIQPS:            1,
+				Namespace:                   "valid-namespace",
+				NumberOfConcurrentWorkers:   1,
+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
+			},
+			nil,
+		},
+		{
+			"with invalid namespace",
+			&config.ControllerConfiguration{
+				Logging: logsapi.LoggingConfiguration{
+					Format: "text",
+				},
+				IngressShimConfig: config.IngressShimConfig{
+					DefaultIssuerKind: "Issuer",
+				},
+				KubernetesAPIBurst:          1,
+				KubernetesAPIQPS:            1,
+				Namespace:                   "INVALID_NAMESPACE!!",
+				NumberOfConcurrentWorkers:   1,
+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
+			},
+			func(cc *config.ControllerConfiguration) field.ErrorList {
+				return field.ErrorList{
+					field.Invalid(field.NewPath("namespace"), cc.Namespace, "must be a valid namespace: a lowercase RFC 1123 label must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?')"),
+				}
+			},
+		},
+		{
+			"with valid leader election namespace",
+			&config.ControllerConfiguration{
+				Logging: logsapi.LoggingConfiguration{
+					Format: "text",
+				},
+				IngressShimConfig: config.IngressShimConfig{
+					DefaultIssuerKind: "Issuer",
+				},
+				KubernetesAPIBurst: 1,
+				KubernetesAPIQPS:   1,
+				LeaderElectionConfig: config.LeaderElectionConfig{
+					LeaderElectionConfig: shared.LeaderElectionConfig{
+						Enabled:       true,
+						LeaseDuration: time.Second,
+						RenewDeadline: time.Second,
+						RetryPeriod:   time.Second,
+					},
+					HealthzTimeout: time.Second,
+					Namespace:      "valid-leader-ns",
+				},
+				NumberOfConcurrentWorkers: 1,
+				PEMSizeLimitsConfig:       validPEMSizeLimitsConfig(),
+			},
+			nil,
+		},
+		{
+			"with invalid leader election namespace",
+			&config.ControllerConfiguration{
+				Logging: logsapi.LoggingConfiguration{
+					Format: "text",
+				},
+				IngressShimConfig: config.IngressShimConfig{
+					DefaultIssuerKind: "Issuer",
+				},
+				KubernetesAPIBurst: 1,
+				KubernetesAPIQPS:   1,
+				LeaderElectionConfig: config.LeaderElectionConfig{
+					LeaderElectionConfig: shared.LeaderElectionConfig{
+						Enabled:       true,
+						LeaseDuration: time.Second,
+						RenewDeadline: time.Second,
+						RetryPeriod:   time.Second,
+					},
+					HealthzTimeout: time.Second,
+					Namespace:      "INVALID_LEADER_NS!!",
+				},
+				NumberOfConcurrentWorkers: 1,
+				PEMSizeLimitsConfig:       validPEMSizeLimitsConfig(),
+			},
+			func(cc *config.ControllerConfiguration) field.ErrorList {
+				return field.ErrorList{
+					field.Invalid(field.NewPath("leaderElectionConfig").Child("namespace"), cc.LeaderElectionConfig.Namespace, "must be a valid namespace: a lowercase RFC 1123 label must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?')"),
+				}
+			},
+		},
+		{
+			"with zero concurrent workers",
+			&config.ControllerConfiguration{
+				Logging: logsapi.LoggingConfiguration{
+					Format: "text",
+				},
+				IngressShimConfig: config.IngressShimConfig{
+					DefaultIssuerKind: "Issuer",
+				},
+				KubernetesAPIBurst:          1,
+				KubernetesAPIQPS:            1,
+				NumberOfConcurrentWorkers:   0,
+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
+			},
+			func(cc *config.ControllerConfiguration) field.ErrorList {
+				return field.ErrorList{
+					field.Invalid(field.NewPath("numberOfConcurrentWorkers"), cc.NumberOfConcurrentWorkers, "must be greater than 0"),
+				}
+			},
+		},
+		{
+			"with negative concurrent workers",
+			&config.ControllerConfiguration{
+				Logging: logsapi.LoggingConfiguration{
+					Format: "text",
+				},
+				IngressShimConfig: config.IngressShimConfig{
+					DefaultIssuerKind: "Issuer",
+				},
+				KubernetesAPIBurst:          1,
+				KubernetesAPIQPS:            1,
+				NumberOfConcurrentWorkers:   -5,
+				PEMSizeLimitsConfig:         validPEMSizeLimitsConfig(),
+			},
+			func(cc *config.ControllerConfiguration) field.ErrorList {
+				return field.ErrorList{
+					field.Invalid(field.NewPath("numberOfConcurrentWorkers"), cc.NumberOfConcurrentWorkers, "must be greater than 0"),
+				}
+			},
 		},
 		{
 			"with invalid logging config",
